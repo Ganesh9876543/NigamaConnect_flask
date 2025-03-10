@@ -1,0 +1,30 @@
+name: Deploy Firebase Application
+
+on:
+  push:
+    branches:
+      - main  # This workflow runs when you push changes to the main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest  # Use the latest Ubuntu environment for the job
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3  # Step to clone your repository code
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9  # Specify the Python version to use
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt  # Install Python dependencies from your project
+
+    - name: Run Application
+      env:
+        FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}  # Inject the secret
+      run: |
+        python main.py  # Replace this with the command to run your application
