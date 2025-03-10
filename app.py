@@ -154,22 +154,48 @@ def cleanup_expired_otps():
 
 
 
-try:
-    # Get service account key JSON from environment variable
-    firebase_config = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
+# try:
+#     # Get service account key JSON from environment variable
+#     firebase_config = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
 
-    if firebase_config:
-        # Parse the JSON string from environment variable
-        service_account_info = json.loads(firebase_config)
-        cred = credentials.Certificate(service_account_info)
-        firebase_app = firebase_admin.initialize_app(cred)
+#     if firebase_config:
+#         # Parse the JSON string from environment variable
+#         service_account_info = json.loads(firebase_config)
+#         cred = credentials.Certificate(service_account_info)
+#         firebase_app = firebase_admin.initialize_app(cred)
+#         db = firestore.client()
+#         user_profiles_ref = db.collection('user_profiles')
+#         logger.info("Firebase initialized successfully")
+#     else:
+#         raise ValueError("FIREBASE_SERVICE_ACCOUNT environment variable not set")
+# except Exception as e:
+#     logger.error(f"Error initializing Firebase: {e}")
+#     if os.environ.get('FLASK_ENV') == 'development':
+#         logger.warning("Running in development mode without Firebase")
+#         firebase_app = None
+#         db = None
+#         user_profiles_ref = None
+#     else:
+#         raise
+
+
+try:
+    # Use the secret file path in Render's secret directory
+    secret_file_path = '/etc/secrets/firebase_service_account.json'
+
+    # Verify if the secret file exists
+    if os.path.exists(secret_file_path):
+        cred = credentials.Certificate(secret_file_path)
+        firebase_app = initialize_app(cred)
         db = firestore.client()
         user_profiles_ref = db.collection('user_profiles')
         logger.info("Firebase initialized successfully")
     else:
-        raise ValueError("FIREBASE_SERVICE_ACCOUNT environment variable not set")
+        raise FileNotFoundError(f"Secret file not found at: {secret_file_path}")
 except Exception as e:
     logger.error(f"Error initializing Firebase: {e}")
+
+    # Handle development mode scenario
     if os.environ.get('FLASK_ENV') == 'development':
         logger.warning("Running in development mode without Firebase")
         firebase_app = None
@@ -177,23 +203,6 @@ except Exception as e:
         user_profiles_ref = None
     else:
         raise
-
-
-# try:
-#     cred = credentials.Certificate("./nigamaconnectapp-firebase-adminsdk-fbsvc-22b997f958.json")
-#     firebase_app = initialize_app(cred)
-#     db = firestore.client()
-#     user_profiles_ref = db.collection('user_profiles')  # Ensure this line is executed
-#     logger.info("Firebase initialized successfully")
-# except Exception as e:
-#     logger.error(f"Error initializing Firebase: {e}")
-#     if os.environ.get('FLASK_ENV') == 'development':
-#         logger.warning("Running in development mode without Firebase")
-#         firebase_app = None
-#         db = None
-#         user_profiles_ref = None  # Ensure this is set to None if Firebase fails
-#     else:
-#         raise
 
 # File upload configuration
 UPLOAD_FOLDER = './uploads'
