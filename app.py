@@ -157,7 +157,7 @@ def cleanup_expired_otps():
 try:
     # Get service account key JSON from environment variable
     firebase_config = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
-    
+
     if firebase_config:
         # Parse the JSON string from environment variable
         service_account_info = json.loads(firebase_config)
@@ -177,7 +177,6 @@ except Exception as e:
         user_profiles_ref = None
     else:
         raise
-
 
 
 # try:
