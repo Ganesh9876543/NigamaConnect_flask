@@ -150,21 +150,48 @@ def cleanup_expired_otps():
 # You could call this function periodically, or implement a scheduled task
 
 
+
 try:
-    cred = credentials.Certificate("./nigamaconnectapp-firebase-adminsdk-fbsvc-22b997f958.json")
-    firebase_app = initialize_app(cred)
-    db = firestore.client()
-    user_profiles_ref = db.collection('user_profiles')  # Ensure this line is executed
-    logger.info("Firebase initialized successfully")
+    # Get service account key JSON from environment variable
+    firebase_config = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
+    
+    if firebase_config:
+        # Parse the JSON string from environment variable
+        service_account_info = json.loads(firebase_config)
+        cred = credentials.Certificate(service_account_info)
+        firebase_app = firebase_admin.initialize_app(cred)
+        db = firestore.client()
+        user_profiles_ref = db.collection('user_profiles')
+        logger.info("Firebase initialized successfully")
+    else:
+        raise ValueError("FIREBASE_SERVICE_ACCOUNT environment variable not set")
 except Exception as e:
     logger.error(f"Error initializing Firebase: {e}")
     if os.environ.get('FLASK_ENV') == 'development':
         logger.warning("Running in development mode without Firebase")
         firebase_app = None
         db = None
-        user_profiles_ref = None  # Ensure this is set to None if Firebase fails
+        user_profiles_ref = None
     else:
         raise
+
+
+
+# try:
+#     cred = credentials.Certificate("./nigamaconnectapp-firebase-adminsdk-fbsvc-22b997f958.json")
+#     firebase_app = initialize_app(cred)
+#     db = firestore.client()
+#     user_profiles_ref = db.collection('user_profiles')  # Ensure this line is executed
+#     logger.info("Firebase initialized successfully")
+# except Exception as e:
+#     logger.error(f"Error initializing Firebase: {e}")
+#     if os.environ.get('FLASK_ENV') == 'development':
+#         logger.warning("Running in development mode without Firebase")
+#         firebase_app = None
+#         db = None
+#         user_profiles_ref = None  # Ensure this is set to None if Firebase fails
+#     else:
+#         raise
 
 # File upload configuration
 UPLOAD_FOLDER = './uploads'
