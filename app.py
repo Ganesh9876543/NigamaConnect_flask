@@ -409,6 +409,90 @@ def get_profile():
         }), 500
 
 
+
+@app.route('/api/profile/save_additional_info', methods=['POST'])
+def save_additional_info():
+    """
+    API endpoint to save additional profile information and uploaded photos.
+    Expects JSON data with form data and uploaded photos.
+    """
+    try:
+        # Get the form data and uploaded photos from the request
+        data = request.json
+        email = data.get('email')
+
+        if not email:
+            return jsonify({
+                "success": False,
+                "error": "Email is required"
+            }), 400
+
+        # Extract form data
+        form_data = {
+            "occupation": data.get("occupation"),
+            "education": data.get("education"),
+            "hometown": data.get("hometown"),
+            "alive": data.get("alive"),
+            "dod": data.get("dod"),
+            "country": data.get("country"),
+            "pincode": data.get("pincode"),
+            "flatHouseNo": data.get("flatHouseNo"),
+            "areaStreet": data.get("areaStreet"),
+            "townCity": data.get("townCity"),
+            "state": data.get("state"),
+            "biography": data.get("biography"),
+            "openForWork": data.get("openForWork"),
+            "createdAt": datetime.now().isoformat(),
+            "updatedAt": datetime.now().isoformat()
+        }
+
+        # Extract uploaded photos
+        uploaded_photos = {
+            "uploadedphoto1": data.get("uploadPhoto1"),
+            "uploadedphoto2": data.get("uploadPhoto2"),
+            "uploadedphoto3": data.get("uploadPhoto3")
+        }
+
+        # Save form data to Firestore in the 'additional_info' collection
+        if user_profiles_ref:
+            # Reference to the 'additional_info' collection with email as the document ID
+            additional_info_ref = db.collection('additional_info').document(email)
+            additional_info_ref.set(form_data, merge=True)
+
+            # Save uploaded photos in the 'uploaded_photos' subcollection
+            uploaded_photos_ref = additional_info_ref.collection('uploaded_photos')
+            for photo_id, photo_data in uploaded_photos.items():
+                if photo_data:  # Only save if photo data exists
+                    uploaded_photos_ref.document(photo_id).set({
+                        "imageData": photo_data,
+                        "uploadedAt": datetime.now().isoformat()
+                    })
+
+            logger.info(f"Additional info and photos saved for email: {email}")
+            return jsonify({
+                "success": True,
+                "message": "Additional info and photos saved successfully",
+                "email": email
+            })
+        else:
+            # For development without Firebase
+            logger.warning("Development mode - data not saved to Firebase")
+            return jsonify({
+                "success": True,
+                "message": "Development mode - data received but not saved",
+                "formData": form_data,
+                "uploadedPhotos": uploaded_photos,
+                "email": email
+            })
+
+    except Exception as e:
+        logger.error(f"Error saving additional info and photos: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
 @app.route('/api/profile/update', methods=['PUT'])
 def update_profile():
     """
