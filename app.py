@@ -456,7 +456,9 @@ def save_additional_info():
         # Save form data to Firestore in the 'additional_info' collection
         if user_profiles_ref:
             # Reference to the 'additional_info' collection with email as the document ID
-            additional_info_ref = db.collection('additional_info').document(email)
+            
+            user_doc = user_profiles_ref.document(email).get()
+            additional_info_ref = user_profiles_ref.document(email).collection('additional_info').document(email)
             additional_info_ref.set(form_data, merge=True)
 
             # Save uploaded photos in the 'uploaded_photos' subcollection
@@ -491,6 +493,119 @@ def save_additional_info():
             "success": False,
             "error": str(e)
         }), 500
+
+
+
+
+@app.route('/api/profile/set_login_true', methods=['POST'])
+def set_login_true():
+    """
+    API endpoint to set the 'login' attribute to true for a document referenced by email.
+    Expects JSON data with the email.
+    """
+    try:
+        # Get the email from the request
+        data = request.json
+        email = data.get('email')
+
+        if not email:
+            return jsonify({
+                "success": False,
+                "error": "Email is required"
+            }), 400
+
+        # Check if Firebase is initialized
+        if db is None or user_profiles_ref is None:
+            logger.warning("Development mode - Firebase not initialized")
+            return jsonify({
+                "success": True,
+                "message": "Development mode - login status not updated in Firebase",
+                "email": email
+            })
+
+        # Reference to the document using the email as the document ID
+        user_ref = user_profiles_ref.document(email)
+
+        # Check if the document exists
+        doc = user_ref.get()
+
+        if doc.exists:
+            # Update the document to set 'login' to true
+            user_ref.update({"login": True})
+            logger.info(f"Login set to true for email: {email}")
+            return jsonify({
+                "success": True,
+                "message": "Login set to true successfully",
+                "email": email
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Document not found"
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Error setting login to true: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/profile/set_login_false', methods=['POST'])
+def set_login_false():
+    """
+    API endpoint to set the 'login' attribute to false for a document referenced by email.
+    Expects JSON data with the email.
+    """
+    try:
+        # Get the email from the request
+        data = request.json
+        email = data.get('email')
+
+        if not email:
+            return jsonify({
+                "success": False,
+                "error": "Email is required"
+            }), 400
+
+        # Check if Firebase is initialized
+        if db is None or user_profiles_ref is None:
+            logger.warning("Development mode - Firebase not initialized")
+            return jsonify({
+                "success": True,
+                "message": "Development mode - login status not updated in Firebase",
+                "email": email
+            })
+
+        # Reference to the document using the email as the document ID
+        user_ref = user_profiles_ref.document(email)
+
+        # Check if the document exists
+        doc = user_ref.get()
+
+        if doc.exists:
+            # Update the document to set 'login' to false
+            user_ref.update({"login": False})
+            logger.info(f"Login set to false for email: {email}")
+            return jsonify({
+                "success": True,
+                "message": "Login set to false successfully",
+                "email": email
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Document not found"
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Error setting login to false: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 
 
 @app.route('/api/profile/update', methods=['PUT'])
