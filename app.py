@@ -247,7 +247,7 @@ def create_profile():
         email = profile_data.get('email')
         
         # Generate a unique ID for the profile image entry
-        image_entry_id = str(uuid.uuid4())
+        image_entry_id = "profileimage"
         
         # Add timestamps
         now = datetime.now().isoformat()
@@ -407,8 +407,8 @@ def get_profile():
             "success": False,
             "error": str(e)
         }), 500
-
-
+        
+        
 
 @app.route('/api/profile/save_additional_info', methods=['POST'])
 def save_additional_info():
@@ -605,121 +605,179 @@ def set_login_false():
             "success": False,
             "error": str(e)
         }), 500
-
-
-
-@app.route('/api/profile/update', methods=['PUT'])
-def update_profile():
+        
+        
+        
+@app.route('/api/profile/dashboard-image', methods=['POST'])
+def set_dashboard_profile():
     """
-    API endpoint to update an existing user profile.
-    Expects JSON data with user profile information and userId.
+    API endpoint to set a specific profile image as the dashboard profile.
+    It takes an email and image byte data, updates the image in the database, 
+    and marks it as the dashboard profile image.
     """
     try:
-        profile_data = request.json
-        
-        # Validate userId
-        user_id = profile_data.get('userId')
-        if not user_id:
+        # Get data from request
+        data = request.json
+        email = data.get('email')
+        profile_image = data.get('profileImage')  # Byte code image data
+
+        # Validate input
+        if not email:
             return jsonify({
                 "success": False,
-                "error": "Missing userId"
+                "error": "Email is required"
             }), 400
-        
-        # Update timestamp
-        profile_data['updatedAt'] = datetime.now().isoformat()
-        
-        # Update in Firebase
-        if user_profiles_ref:
-            doc_ref = user_profiles_ref.document(user_id)
-            
-            # Check if document exists
-            doc = doc_ref.get()
-            if not doc.exists:
-                return jsonify({
-                    "success": False,
-                    "error": f"Profile with ID {user_id} not found"
-                }), 404
-                
-            doc_ref.update(profile_data)
-            logger.info(f"Profile updated with ID: {user_id}")
-            
+
+        if not profile_image:
             return jsonify({
-                "success": True,
-                "message": "Profile updated successfully"
-            })
-        else:
-            # For development without Firebase
+                "success": False,
+                "error": "Profile image data is required"
+            }), 400
+
+        # Fetch the user document reference
+        user_doc_ref = user_profiles_ref.document(email)
+        user_doc = user_doc_ref.get()
+
+        if not user_doc.exists:
             return jsonify({
-                "success": True,
-                "message": "Development mode - update request received",
-                "data": profile_data
-            })
-            
+                "success": False,
+                "error": "User with the provided email does not exist"
+            }), 404
+
+        # Use 'dashboardprofile' as the document ID for the dashboard image
+        dashboard_image_id = "dashboardprofile"
+
+        # Save the image to the profileImages subcollection
+        profile_images_ref = user_doc_ref.collection('profileImages')
+        image_doc_ref = profile_images_ref.document(dashboard_image_id)
+        now = datetime.now().isoformat()
+
+        image_doc_ref.set({
+            'imageData': profile_image,
+            'uploadedAt': now,
+            'imageId': dashboard_image_id,
+            'isDashboardProfile': True
+        })
+
+        # Update the user document with a reference to the dashboard profile image
+        user_doc_ref.update({
+            'dashboardProfileImageId': dashboard_image_id
+        })
+
+        logger.info(f"Dashboard profile image set for {email} with image ID: {dashboard_image_id}")
+        return jsonify({
+            "success": True,
+            "message": "Dashboard profile image set successfully",
+            "email": email,
+            "dashboardImageId": dashboard_image_id
+        })
+
     except Exception as e:
-        logger.error(f"Error updating profile: {e}")
+        logger.error(f"Error setting dashboard profile image: {e}")
         return jsonify({
             "success": False,
             "error": str(e)
         }), 500
 
-@app.route('/api/profile/upload_photo', methods=['POST'])
-def upload_profile_photo():
+
+@app.route('/api/profile/dashboard-image/<email>', methods=['GET'])
+def get_dashboard_profile(email):
     """
-    API endpoint to upload a profile photo.
-    Expects a file and userId in the request.
+    API endpoint to get the dashboard profile image for a user by email.
     """
     try:
-        # Check if the post request has the file part
-        if 'file' not in request.files:
+        # Fetch the user document reference
+        user_doc_ref = user_profiles_ref.document(email)
+        user_doc = user_doc_ref.get()
+
+        if not user_doc.exists:
             return jsonify({
                 "success": False,
-                "error": "No file part"
-            }), 400
-        
-        file = request.files['file']
-        user_id = request.form.get('userId')
-        
-        # Validate userId
-        if not user_id:
+                "error": "User with the provided email does not exist"
+            }), 404
+
+        # Get the dashboard profile image ID from the user document
+        dashboard_image_id = user_doc.get('dashboardProfileImageId')
+
+        if not dashboard_image_id:
             return jsonify({
                 "success": False,
-                "error": "Missing userId"
-            }), 400
-        
-        # If the user does not select a file, the browser submits an empty file without a filename
-        if file.filename == '':
+                "error": "Dashboard profile image is not set for this user"
+            }), 404
+
+        # Fetch the image data from the profileImages subcollection
+        profile_images_ref = user_doc_ref.collection('profileImages')
+        image_doc_ref = profile_images_ref.document(dashboard_image_id)
+        image_doc = image_doc_ref.get()
+
+        if not image_doc.exists:
             return jsonify({
                 "success": False,
-                "error": "No selected file"
-            }), 400
-        
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-            
-            # Save the file path to the user's profile in Firebase
-            if user_profiles_ref:
-                doc_ref = user_profiles_ref.document(user_id)
-                doc_ref.update({'profilePhotoUrl': file_path})
-            
-            return jsonify({
-                "success": True,
-                "message": "File uploaded successfully",
-                "filePath": file_path
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "error": "File type not allowed"
-            }), 400
-            
+                "error": "Dashboard profile image data not found"
+            }), 404
+
+        # Return the image data
+        image_data = image_doc.get('imageData')
+
+        logger.info(f"Retrieved dashboard profile image for {email}")
+        return jsonify({
+            "success": True,
+            "email": email,
+            "dashboardImageId": dashboard_image_id,
+            "imageData": image_data
+        })
+
     except Exception as e:
-        logger.error(f"Error uploading profile photo: {e}")
+        logger.error(f"Error retrieving dashboard profile image: {e}")
         return jsonify({
             "success": False,
             "error": str(e)
         }), 500
+      
+        
+from fetch_all_profile_data import fetch_all_profile_data        
+@app.route('/api/profile/get_all_data', methods=['GET'])
+def get_all_profile_data():
+    """
+    API endpoint to fetch all user profile data, including:
+    - Basic profile data
+    - Profile image
+    - Additional info
+    - Uploaded photos
+    """
+    try:
+        # Get email from query parameter
+        email = request.args.get('email')
+        
+        if not email:
+            return jsonify({
+                "success": False,
+                "error": "Email parameter is required"
+            }), 400
+            
+        logger.info(f"Received request to fetch all profile data for email: {email}")
+        
+        # Fetch all profile data using the helper function
+        profile_data = fetch_all_profile_data(email,user_profiles_ref)
+        
+        if not profile_data:
+            return jsonify({
+                "success": False,
+                "error": "Profile not found"
+            }), 404
+        
+        return jsonify({
+            "success": True,
+            "profile": profile_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching all profile data: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 
 
 if __name__ == '__main__':
