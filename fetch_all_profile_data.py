@@ -10,49 +10,45 @@ from werkzeug.utils import secure_filename
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def fetch_all_profile_data(email,user_profiles_ref):
+def fetch_all_profile_data(email, user_profiles_ref):
     """
     Helper function to fetch all profile data for a given email.
     Returns a dictionary containing:
     - Basic profile data
     - Profile image
     - Additional info
-    - Uploaded photos
+    - Uploaded photos (as a list)
     """
     try:
         # Fetch profile from Firebase
         if not user_profiles_ref:
             logger.warning("Development mode - returning mock profile data")
             return {
-                "firstName": "Venkateswararo",
-                "lastName": "Megadula",
+                "firstName": "",
+                "lastName": "",
                 "email": email,
-                "phone": "+91 9032038890",
-                "dob": "17/11/1986",
-                "gender": "Male",
-                "caste": "OC",
-                "maritalStatus": "Married",
+                "phone": "",
+                "dob": "",
+                "gender": "",
+                "caste": "",
+                "maritalStatus": "",
                 "profileImage": None,  # Mock data has no image
                 "additionalInfo": {
-                    "occupation": "Software Engineer",
-                    "education": "B.Tech",
-                    "hometown": "Hyderabad",
-                    "alive": True,
+                    "occupation": "",
+                    "education": "",
+                    "hometown": "",
+                    "alive": None,
                     "dod": None,
-                    "country": "India",
-                    "pincode": "500001",
-                    "flatHouseNo": "123",
-                    "areaStreet": "Main Street",
-                    "townCity": "Hyderabad",
-                    "state": "Telangana",
-                    "biography": "I am a software engineer.",
-                    "openForWork": True
+                    "country": "",
+                    "pincode": "",
+                    "flatHouseNo": "",
+                    "areaStreet": "",
+                    "townCity": "",
+                    "state": "",
+                    "biography": "",
+                    "openForWork": None
                 },
-                "uploadedPhotos": {
-                    "uploadedphoto1": "base64_image_data_1",
-                    "uploadedphoto2": "base64_image_data_2",
-                    "uploadedphoto3": "base64_image_data_3"
-                }
+                "uploadedPhotos": []  # Return an empty list for mock data
             }
 
         # Get user document with email as ID
@@ -83,12 +79,15 @@ def fetch_all_profile_data(email,user_profiles_ref):
         if additional_info_doc.exists:
             additional_info = additional_info_doc.to_dict()
         
-        # Fetch uploaded photos
-        uploaded_photos = {}
+        # Fetch uploaded photos as a list
+        uploaded_photos = []
         uploaded_photos_ref = user_profiles_ref.document(email).collection('additional_info').document(email).collection('uploaded_photos').stream()
         
         for photo_doc in uploaded_photos_ref:
-            uploaded_photos[photo_doc.id] = photo_doc.to_dict().get('imageData')
+            uploaded_photos.append({
+                "id": photo_doc.id,  # Include the document ID for reference
+                "imageData": photo_doc.to_dict().get('imageData')
+            })
         
         # Prepare response data
         profile_data = {
@@ -102,7 +101,7 @@ def fetch_all_profile_data(email,user_profiles_ref):
             "maritalStatus": user_data.get('MARITAL_STATUS'),
             "profileImage": profile_image_base64,
             "additionalInfo": additional_info,
-            "uploadedPhotos": uploaded_photos
+            "uploadedPhotos": uploaded_photos  # Return as a list
         }
         
         return profile_data
