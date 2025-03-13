@@ -607,7 +607,46 @@ def set_login_false():
         }), 500
         
         
-        
+from getloginstatus import get_login_status
+@app.route('/api/profile/get_login_status', methods=['POST'])
+def get_login_status_api():
+    """
+    API endpoint to get the login status of a user by email.
+    Expects JSON data with the email.
+    """
+    try:
+        # Get the email from the request
+        data = request.json
+        email = data.get('email')
+
+        if not email:
+            return jsonify({
+                "success": False,
+                "error": "Email is required"
+            }), 400
+
+        # Call the get_login_status function
+        success, result = get_login_status(email,user_profiles_ref)
+
+        if success:
+            return jsonify({
+                "success": True,
+                "login_status": result,
+                "email": email
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": result
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Error getting login status: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @app.route('/api/profile/dashboard-image', methods=['POST'])
 def set_dashboard_profile():
     """
@@ -773,6 +812,45 @@ def get_all_profile_data():
         
     except Exception as e:
         logger.error(f"Error fetching all profile data: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+from update_profile_in_firebase import update_profile_in_firebase        
+@app.route('/api/profile/update_profile', methods=['POST'])
+def update_profile():
+
+    try:
+        # Get the JSON data from the request
+        data = request.json
+        email = data.get('email')
+
+        if not email:
+            return jsonify({
+                "success": False,
+                "error": "Email is required"
+            }), 400
+
+        # Check if Firebase is initialized
+        if db is None or user_profiles_ref is None:
+            logger.warning("Development mode - Firebase not initialized")
+            return jsonify({
+                "success": True,
+                "message": "Development mode - profile not updated in Firebase",
+                "email": email
+            })
+
+        # Call the core function to update the profile
+        result = update_profile_in_firebase(email, data, user_profiles_ref)
+
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 500
+
+    except Exception as e:
+        logger.error(f"Error in update_profile API: {e}")
         return jsonify({
             "success": False,
             "error": str(e)
