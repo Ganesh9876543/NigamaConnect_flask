@@ -10,6 +10,8 @@ from werkzeug.utils import secure_filename
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+import uuid
+
 def update_profile_in_firebase(email, data, user_profiles_ref):
     """
     Core function to update profile details in Firebase.
@@ -50,10 +52,17 @@ def update_profile_in_firebase(email, data, user_profiles_ref):
 
         # Update uploaded photos (if provided)
         uploaded_photos = data.get('uploadedPhotos')
-        if uploaded_photos:
+        if uploaded_photos is not None:  # Check if the field is provided (even if empty)
+            # Delete existing uploaded photos
+            photos_collection_ref = user_ref.collection('additional_info').document(email).collection('uploaded_photos')
+            existing_photos = photos_collection_ref.stream()
+            for photo in existing_photos:
+                photo.reference.delete()
+
+            # Add new uploaded photos
             for photo in uploaded_photos:
                 photo_id = photo.get('id', str(uuid.uuid4()))  # Use provided ID or generate a new one
-                user_ref.collection('additional_info').document(email).collection('uploaded_photos').document(photo_id).set({
+                photos_collection_ref.document(photo_id).set({
                     "imageData": photo.get('imageData')
                 })
 
