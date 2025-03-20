@@ -856,6 +856,54 @@ def update_profile():
             "error": str(e)
         }), 500
 
+from generate_family_tree import generate_family_tree
+@app.route('/generate-tree', methods=['POST'])
+def generate_tree():
+    data = request.get_json()
+    family_members = data.get('familyMembers', [])
+    
+    if not family_members:
+        return jsonify({'error': 'No family data provided'}), 400
+
+    try:
+        img_base64 = generate_family_tree(family_members)
+        return jsonify({'image': img_base64})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+from search_profiles_by_info import search_profiles_by_info    
+@app.route('/api/search-profiles', methods=['POST'])
+def search_profiles():
+    try:
+        data = request.json
+        first_name = data.get('firstName', '')
+        last_name = data.get('lastName', '')
+        email = data.get('email', '')
+        phone = data.get('phone', '')
+        
+        # Ensure at least one search parameter is provided
+        if not any([first_name, last_name, email, phone]):
+            return jsonify({"error": "At least one search parameter (firstName, lastName, email, or phone) is required"}), 400
+        
+        # Pass all search parameters to the function
+        matches = search_profiles_by_info(
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            phone=phone,
+            db=db
+        )
+        
+        return jsonify({
+            "success": True,
+            "matches": matches
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in search-profiles endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 
 if __name__ == '__main__':
