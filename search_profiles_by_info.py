@@ -105,12 +105,12 @@ def search_profiles_by_info(first_name=None, last_name=None, email=None, phone=N
         if (first_name or last_name) and not matches:
             # Query optimization - use the more specific field if available
             if first_name and not last_name:
-                name_query = db.collection('user_profiles').filter('firstName', '==', first_name.capitalize()).limit(50).stream()
+                name_query = db.collection('user_profiles').where('firstName', '==', first_name.capitalize()).limit(50).stream()
             elif last_name and not first_name:
-                name_query = db.collection('user_profiles').filter('firstName', '==', first_name.capitalize()).limit(50).stream()
+                name_query = db.collection('user_profiles').where('lastName', '==', last_name.capitalize()).limit(50).stream()
             else:
                 # If both names provided, start with first name for better efficiency
-                name_query = db.collection('user_profiles').filter('firstName', '==', first_name.capitalize()).limit(50).stream()
+                name_query = db.collection('user_profiles').where('firstName', '==', first_name.capitalize()).limit(50).stream()
             
             # Process first batch of results
             for doc in name_query:
