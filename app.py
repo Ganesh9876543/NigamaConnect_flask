@@ -867,6 +867,11 @@ def generate_tree():
 
     try:
         img_base64 = generate_family_tree(family_members)
+        
+        # Check if the result is an error message (string) or actual base64 data
+        if isinstance(img_base64, str) and img_base64.startswith('Error:'):
+            return jsonify({'error': img_base64}), 500
+            
         return jsonify({'image': img_base64})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
