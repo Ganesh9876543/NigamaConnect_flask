@@ -11,8 +11,9 @@ import os
 import tempfile
 import base64
 from graphviz import Digraph
-
 import base64
+import os
+import tempfile
 from graphviz import Digraph
 
 def generate_family_tree(family_data):
@@ -125,8 +126,7 @@ def generate_family_tree(family_data):
             # Generate gradient colors based on generation
             generation_colors = ["#1E90FF:#00BFFF", "#4169E1:#1E90FF", "#0000CD:#4169E1", "#00008B:#0000CD"]
             gen = member.get('generation', 0)
-            gen_index = abs(gen) % len(generation_colors)
-            line_color = generation_colors[gen_index]
+            line_color = generation_colors[abs(gen) % len(generation_colors)]
             
             if parent and parent.get('spouse'):
                 spouse_ids = sorted([parent['id'], parent['spouse']])
@@ -134,11 +134,11 @@ def generate_family_tree(family_data):
                 if marriage_id in marriages:
                     dot.edge(marriage_id, member['id'], color=line_color, penwidth="3.0",  # Thicker arrow
                              style=line_style, arrowhead="normal", arrowtail="none", 
-                             arrowsize="1.2")  # Tapered arrow (removed taper attribute)
+                             arrowsize="1.2", taper="true")  # Tapered arrow
             else:
                 dot.edge(member['parentId'], member['id'], color=line_color, penwidth="3.0",  # Thicker arrow
                          style=line_style, arrowhead="normal", arrowtail="none", 
-                         arrowsize="1.2")  # Tapered arrow (removed taper attribute)
+                         arrowsize="1.2", taper="true")  # Tapered arrow
 
     # Add special symbols for expansion points with enhanced designs
     for member in family_data:
@@ -176,13 +176,8 @@ def generate_family_tree(family_data):
         legend.edge('marr_leg', 'child_leg', style="invis")
         legend.edge('child_leg', 'spouse_leg', style="invis")
 
-    # Use pipe() method to get image data directly as bytes
-    try:
-        img_data = dot.pipe(format='png')
-        img_base64 = base64.b64encode(img_data).decode('utf-8')
-        return img_base64
-    except Exception as e:
-        # For debugging - generate the dot file
-        dot_source = dot.source
-        error_message = f"Error: {str(e)}\nMake sure Graphviz is installed and in your PATH."
-        return error_message
+    # Use BytesIO instead of temporary file for Render compatibility
+    import io
+    img_data = dot.pipe(format='png')
+    img_base64 = base64.b64encode(img_data).decode('utf-8')
+    return img_base64
