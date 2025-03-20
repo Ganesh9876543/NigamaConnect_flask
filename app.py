@@ -867,14 +867,12 @@ def generate_tree():
 
     try:
         img_base64 = generate_family_tree(family_members)
-        
-        # Check if the result is an error message (string) or actual base64 data
-        if isinstance(img_base64, str) and img_base64.startswith('Error:'):
-            return jsonify({'error': img_base64}), 500
-            
         return jsonify({'image': img_base64})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error generating family tree: {str(e)}\n{error_details}")
+        return jsonify({'error': str(e), 'details': error_details}), 500
 
 
 from search_profiles_by_info import search_profiles_by_info    
