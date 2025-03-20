@@ -16,76 +16,49 @@ import os
 import tempfile
 from graphviz import Digraph
 
-def generate_family_tree(family_data):
-    # Create a Digraph object with enhanced background
-    dot = Digraph(
-        comment='Family Tree',
-        format='png',
-        engine='dot',
-        graph_attr={
-            'rankdir': 'TB',  # Top to bottom direction
-            'splines': 'polyline',  # Use polyline for natural connections
-            'bgcolor': 'white:lightgrey',  # Gradient background (white to light grey)
-            'nodesep': '0.75',  # Node separation
-            'ranksep': '1.0',  # Rank separation
-            'fontname': 'Arial',
-            'style': 'rounded,filled',  # Add rounded style to the graph
-            'color': '#4682B4',  # Steel blue border color
-            'penwidth': '3.0',  # Thicker border
-        },
-        node_attr={
-            'shape': 'box',
-            'style': 'filled,rounded',
-            'fillcolor': 'white',
-            'penwidth': '2.0',
-            'fontsize': '14',
-            'fontname': 'Arial',
-            'height': '0.6',
-            'width': '1.6',
-            'margin': '0.2'
-        },
-        edge_attr={
-            'color': 'black',
-            'penwidth': '2.0'
-        }
-    )
+import base64
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import networkx as nx
+from io import BytesIO
 
-    # Add nodes for each family member with enhanced design
+def generate_family_tree(family_data):
+    """
+    Generate a family tree visualization using Matplotlib and NetworkX
+    which doesn't require external Graphviz executables.
+    """
+    # Create a directed graph
+    G = nx.DiGraph()
+    
+    # Marriage tracking
+    marriages = {}
+    
+    # Add nodes for each family member
     for member in family_data:
-        # Gender-specific colors with gradient
-        if member['gender'] == 'male':
-            fillcolor = '#ADD8E6:#87CEEB'  # Gradient: Light blue to sky blue
-            fontcolor = '#000080'  # Navy blue
-        else:
-            fillcolor = '#FFD1DC:#FF9999'  # Gradient: Light pink to soft red
-            fontcolor = '#8B0000'  # Dark red
+        # Add the member as a node
+        member_id = member['id']
         
-        # Special color for "me" with gradient
-        if member.get('relation') == 'myself' or member.get('name', '').lower() == 'me':
-            fillcolor = '#90EE90:#32CD32'  # Gradient: Light green to lime green
-            fontcolor = '#006400'  # Dark green
-        
-        # Create a stylized label with generation info
+        # Create label
         label = f"{member['name']}"
         if member.get('relation') and member['relation'] != 'myself':
             label += f"\n{member['relation']}"
-        label += f"\nGen: {member['generation']}"  # Add generation label
+        label += f"\nGen: {member['generation']}"
         
-        # Add node with shadow and gradient
-        dot.node(
-            member['id'], 
-            label=label, 
-            fillcolor=fillcolor, 
-            fontcolor=fontcolor,
-            style='filled,rounded,shadow',  # Add shadow effect
-            penwidth='2.0'
-        )
-
-    # Add marriage nodes and connections, ensuring spouses are side by side
-    marriages = {}
-    for member in family_data:
+        # Set node attributes including colors based on gender
+        if member['gender'] == 'male':
+            color = '#ADD8E6'  # Light blue
+        else:
+            color = '#FFD1DC'  # Light pink
+            
+        # Special color for "me"
+        if member.get('relation') == 'myself' or member.get('name', '').lower() == 'me':
+            color = '#90EE90'  # Light green
+            
+        G.add_node(member_id, label=label, color=color, member=True, gender=member['gender'])
+        
+        # Track marriages
         if member.get('spouse'):
-            # Sort the IDs to ensure a consistent marriage ID
+            # Sort IDs to ensure consistent marriage node ID
             spouse_ids = sorted([member['id'], member['spouse']])
             marriage_id = f"marriage_{spouse_ids[0]}_{spouse_ids[1]}"
             
@@ -94,90 +67,128 @@ def generate_family_tree(family_data):
                     'id': marriage_id,
                     'partners': spouse_ids
                 }
-
-                # Create a subgraph to force the spouses to be side by side
-                with dot.subgraph(name=f'cluster_{marriage_id}') as c:
-                    c.attr(rank='same')  # Ensure both spouses are on the same rank
-                    c.node(spouse_ids[0])  # Husband
-                    c.node(spouse_ids[1])  # Wife
-
-                # Create a marriage node with enhanced design
-                dot.node(marriage_id, label="♥", shape="circle", width="0.25", height="0.25", 
-                         color="#FF69B4", fontcolor="#FF69B4", fontsize="12", 
-                         style="filled,shadow", fillcolor="#FF69B4:#FF1493")  # Gradient fill
-                
-                # Connect both spouses to the marriage node with gradient edges
-                dot.edge(spouse_ids[0], marriage_id, color="#FF69B4:#FF1493", penwidth="2.0", 
-                         arrowhead="none", style="solid")
-                dot.edge(spouse_ids[1], marriage_id, color="#FF1493:#FF69B4", penwidth="2.0", 
-                         arrowhead="none", style="dotted")
-
-    # Connect parents to children with thicker, gradient, and tapered arrows
+                # Add the marriage node
+                G.add_node(marriage_id, label="♥", color='#FF69B4', member=False, is_marriage=True)
+                # Connect spouses to marriage node
+                G.add_edge(spouse_ids[0], marriage_id, relation='spouse')
+                G.add_edge(spouse_ids[1], marriage_id, relation='spouse')
+    
+    # Add parent-child relationships
     for member in family_data:
         if member.get('parentId'):
-            # If parent has a spouse, connect to marriage node
             parent = next((p for p in family_data if p['id'] == member['parentId']), None)
             
-            # Generate different line styles based on birth order
-            birth_order = member.get('birthOrder', 0)
-            line_styles = ["solid", "dashed", "dotted"]
-            line_style = line_styles[birth_order % len(line_styles)]
-            
-            # Generate gradient colors based on generation
-            generation_colors = ["#1E90FF:#00BFFF", "#4169E1:#1E90FF", "#0000CD:#4169E1", "#00008B:#0000CD"]
-            gen = member.get('generation', 0)
-            line_color = generation_colors[abs(gen) % len(generation_colors)]
-            
+            # If parent has spouse, connect from marriage node
             if parent and parent.get('spouse'):
                 spouse_ids = sorted([parent['id'], parent['spouse']])
                 marriage_id = f"marriage_{spouse_ids[0]}_{spouse_ids[1]}"
                 if marriage_id in marriages:
-                    dot.edge(marriage_id, member['id'], color=line_color, penwidth="3.0",  # Thicker arrow
-                             style=line_style, arrowhead="normal", arrowtail="none", 
-                             arrowsize="1.2", taper="true")  # Tapered arrow
+                    G.add_edge(marriage_id, member['id'], relation='parent-child')
             else:
-                dot.edge(member['parentId'], member['id'], color=line_color, penwidth="3.0",  # Thicker arrow
-                         style=line_style, arrowhead="normal", arrowtail="none", 
-                         arrowsize="1.2", taper="true")  # Tapered arrow
-
-    # Add special symbols for expansion points with enhanced designs
+                # Otherwise connect directly from parent
+                G.add_edge(member['parentId'], member['id'], relation='parent-child')
+    
+    # Add expansion points
     for member in family_data:
         if member.get('canAddWife'):
             plus_id = f"add_wife_{member['id']}"
-            dot.node(plus_id, label="+", shape="diamond", width="0.3", height="0.3", 
-                     fillcolor="#FFD700:#FFA500", style="filled,shadow", fontcolor="#000000", 
-                     tooltip="Add Wife")  # Tooltip for clarity
-            dot.edge(member['id'], plus_id, style="dashed", color="#FFD700", 
-                     arrowhead="open", arrowsize="0.8")
+            G.add_node(plus_id, label="+", color='#FFD700', member=False, is_plus=True)
+            G.add_edge(member['id'], plus_id, relation='add-wife')
             
         if member.get('canAddChild'):
             plus_id = f"add_child_{member['id']}"
-            dot.node(plus_id, label="+", shape="circle", width="0.3", height="0.3", 
-                     fillcolor="#FF6347:#FF4500", style="filled,shadow", fontcolor="#000000", 
-                     tooltip="Add Child")  # Tooltip for clarity
-            dot.edge(member['id'], plus_id, style="dashed", color="#FF6347", 
-                     arrowhead="vee", arrowsize="0.8")
-
-    # Add a title with a decorative border
-    dot.attr(label=r'\nFamily Tree\n', fontsize="24", fontname="Arial Bold", 
-             labelloc="t", labeljust="c", 
-             style="filled", fillcolor="#F0F8FF", color="#4682B4", penwidth="2.0")
-
-    # Add an enhanced legend for relationship types
-    with dot.subgraph(name='cluster_legend') as legend:
-        legend.attr(label='Legend', style='rounded,filled', fillcolor="#F5F5F5:#DCDCDC", 
-                    color='gray', fontname='Georgia', fontsize='14', 
-                    penwidth="2.0", margin="10")
-        # Legend nodes with icons
-        legend.node('marr_leg', label='♥ Marriage', shape='plaintext', fontcolor="#FF69B4")
-        legend.node('child_leg', label='→ Parent-Child', shape='plaintext', fontcolor="#1E90FF")
-        legend.node('spouse_leg', label='… Spouse', shape='plaintext', fontcolor="#FF1493")
-        # Invisible edges to align legend items vertically
-        legend.edge('marr_leg', 'child_leg', style="invis")
-        legend.edge('child_leg', 'spouse_leg', style="invis")
-
-    # Use BytesIO instead of temporary file for Render compatibility
-    import io
-    img_data = dot.pipe(format='png')
-    img_base64 = base64.b64encode(img_data).decode('utf-8')
+            G.add_node(plus_id, label="+", color='#FF6347', member=False, is_plus=True)
+            G.add_edge(member['id'], plus_id, relation='add-child')
+    
+    # Use hierarchical layout
+    pos = nx.nx_agraph.graphviz_layout(G, prog='dot') if nx.nx_agraph.graphviz_layout else nx.spring_layout(G)
+    
+    # Create figure with reasonable size
+    plt.figure(figsize=(12, 10))
+    
+    # Draw nodes
+    member_nodes = [n for n, attr in G.nodes(data=True) if attr.get('member', False)]
+    marriage_nodes = [n for n, attr in G.nodes(data=True) if attr.get('is_marriage', False)]
+    plus_nodes = [n for n, attr in G.nodes(data=True) if attr.get('is_plus', False)]
+    
+    # Draw member nodes (people)
+    for node in member_nodes:
+        x, y = pos[node]
+        gender = G.nodes[node]['gender']
+        color = G.nodes[node]['color']
+        label = G.nodes[node]['label']
+        
+        # Draw node with gender-specific shape (rectangle for all but slightly different)
+        if gender == 'male':
+            rect = patches.Rectangle((x-40, y-20), 80, 40, linewidth=2, edgecolor='black', facecolor=color, zorder=2)
+        else:
+            rect = patches.Rectangle((x-40, y-20), 80, 40, linewidth=2, edgecolor='black', facecolor=color, zorder=2, 
+                                    alpha=0.8, joinstyle='round')
+        plt.gca().add_patch(rect)
+        
+        # Add label (multiline text)
+        lines = label.split('\n')
+        for i, line in enumerate(lines):
+            plt.text(x, y-10+i*12, line, ha='center', va='center', fontsize=8, zorder=3)
+    
+    # Draw marriage nodes (hearts)
+    for node in marriage_nodes:
+        x, y = pos[node]
+        plt.scatter(x, y, s=100, color='#FF69B4', marker='o', zorder=2)
+        plt.text(x, y, '♥', ha='center', va='center', fontsize=10, color='white', zorder=3)
+    
+    # Draw plus nodes (addition symbols)
+    for node in plus_nodes:
+        x, y = pos[node]
+        color = G.nodes[node]['color']
+        plt.scatter(x, y, s=80, color=color, marker='s', zorder=2)
+        plt.text(x, y, '+', ha='center', va='center', fontsize=10, color='black', zorder=3)
+    
+    # Draw edges
+    for u, v, attr in G.edges(data=True):
+        relation = attr.get('relation', '')
+        x1, y1 = pos[u]
+        x2, y2 = pos[v]
+        
+        if relation == 'spouse':
+            plt.plot([x1, x2], [y1, y2], 'k-', alpha=0.7, zorder=1)
+        elif relation == 'parent-child':
+            plt.plot([x1, x2], [y1, y2], 'b-', alpha=0.7, zorder=1)
+        elif relation == 'add-wife':
+            plt.plot([x1, x2], [y1, y2], 'g--', alpha=0.5, zorder=1)
+        elif relation == 'add-child':
+            plt.plot([x1, x2], [y1, y2], 'r--', alpha=0.5, zorder=1)
+        else:
+            plt.plot([x1, x2], [y1, y2], 'k-', alpha=0.3, zorder=1)
+    
+    # Add title
+    plt.title('Family Tree', fontsize=16, pad=20)
+    
+    # Add legend
+    legend_elements = [
+        patches.Patch(facecolor='#ADD8E6', edgecolor='black', label='Male'),
+        patches.Patch(facecolor='#FFD1DC', edgecolor='black', label='Female'),
+        patches.Patch(facecolor='#90EE90', edgecolor='black', label='Self'),
+        plt.Line2D([0], [0], color='blue', lw=2, label='Parent-Child'),
+        plt.Line2D([0], [0], color='black', lw=2, label='Marriage'),
+        plt.Line2D([0], [0], color='green', linestyle='--', lw=2, label='Add Spouse'),
+        plt.Line2D([0], [0], color='red', linestyle='--', lw=2, label='Add Child')
+    ]
+    plt.legend(handles=legend_elements, loc='lower right')
+    
+    # Remove axes
+    plt.axis('off')
+    
+    # Use tight layout
+    plt.tight_layout()
+    
+    # Save to BytesIO buffer rather than file
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+    buffer.seek(0)
+    
+    # Encode to base64
+    img_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+    plt.close()
+    
     return img_base64
