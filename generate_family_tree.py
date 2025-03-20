@@ -12,6 +12,9 @@ import tempfile
 import base64
 from graphviz import Digraph
 
+import base64
+from graphviz import Digraph
+
 def generate_family_tree(family_data):
     # Create a Digraph object with enhanced background
     dot = Digraph(
@@ -57,7 +60,7 @@ def generate_family_tree(family_data):
             fontcolor = '#8B0000'  # Dark red
         
         # Special color for "me" with gradient
-        if member.get('relation') == 'myself' or member.get('name').lower() == 'me':
+        if member.get('relation') == 'myself' or member.get('name', '').lower() == 'me':
             fillcolor = '#90EE90:#32CD32'  # Gradient: Light green to lime green
             fontcolor = '#006400'  # Dark green
         
@@ -122,7 +125,8 @@ def generate_family_tree(family_data):
             # Generate gradient colors based on generation
             generation_colors = ["#1E90FF:#00BFFF", "#4169E1:#1E90FF", "#0000CD:#4169E1", "#00008B:#0000CD"]
             gen = member.get('generation', 0)
-            line_color = generation_colors[abs(gen) % len(generation_colors)]
+            gen_index = abs(gen) % len(generation_colors)
+            line_color = generation_colors[gen_index]
             
             if parent and parent.get('spouse'):
                 spouse_ids = sorted([parent['id'], parent['spouse']])
@@ -130,11 +134,11 @@ def generate_family_tree(family_data):
                 if marriage_id in marriages:
                     dot.edge(marriage_id, member['id'], color=line_color, penwidth="3.0",  # Thicker arrow
                              style=line_style, arrowhead="normal", arrowtail="none", 
-                             arrowsize="1.2", taper="true")  # Tapered arrow
+                             arrowsize="1.2")  # Tapered arrow (removed taper attribute)
             else:
                 dot.edge(member['parentId'], member['id'], color=line_color, penwidth="3.0",  # Thicker arrow
                          style=line_style, arrowhead="normal", arrowtail="none", 
-                         arrowsize="1.2", taper="true")  # Tapered arrow
+                         arrowsize="1.2")  # Tapered arrow (removed taper attribute)
 
     # Add special symbols for expansion points with enhanced designs
     for member in family_data:
@@ -172,21 +176,13 @@ def generate_family_tree(family_data):
         legend.edge('marr_leg', 'child_leg', style="invis")
         legend.edge('child_leg', 'spouse_leg', style="invis")
 
-    # Render the graph to PNG
-    temp_dir = tempfile.gettempdir()
-    output_path = os.path.join(temp_dir, 'family_tree')
-    
+    # Use pipe() method to get image data directly as bytes
     try:
-        dot.render(output_path, format='png', cleanup=True)
-        
-        # Read the image and encode it to base64
-        with open(f"{output_path}.png", 'rb') as f:
-            img_data = f.read()
+        img_data = dot.pipe(format='png')
         img_base64 = base64.b64encode(img_data).decode('utf-8')
-        
         return img_base64
     except Exception as e:
-        # For debugging
-        with open(f"{output_path}.dot", 'w') as f:
-            f.write(dot.source)
-        return f"Error: {str(e)}\nDOT file saved to {output_path}.dot for debugging"
+        # For debugging - generate the dot file
+        dot_source = dot.source
+        error_message = f"Error: {str(e)}\nMake sure Graphviz is installed and in your PATH."
+        return error_message
