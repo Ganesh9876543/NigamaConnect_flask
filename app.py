@@ -907,6 +907,51 @@ def search_profiles():
         logger.error(f"Error in search-profiles endpoint: {e}")
         return jsonify({"error": str(e)}), 500
 
+from sendinvite import save_received_invitation, save_sent_invitation   
+
+@app.route('/api/invitations/save', methods=['POST'])
+def save_invitations():
+ 
+    try:
+        # Get the request data
+        data = request.get_json()
+        if not data:
+            logger.error("No data provided in the request")
+            return jsonify({"error": "No data provided"}), 400
+
+        sent_invitation = data.get('sentInvitations')
+        received_invitation = data.get('receivedInvitations')
+        print(sent_invitation)
+        print(received_invitation)
+        
+        if not sent_invitation or not received_invitation:
+            logger.error("Both sentInvitation and receivedInvitation are required")
+            return jsonify({"error": "Both sentInvitation and receivedInvitation are required"}), 400
+
+        # Save sent invitation
+        sent_success = save_sent_invitation(sent_invitation,user_profiles_ref)
+
+        # Save received invitation
+        received_success = save_received_invitation(received_invitation,user_profiles_ref)
+
+        if not sent_success or not received_success:
+            logger.error("Failed to save one or both invitations")
+            return jsonify({"error": "Failed to save one or both invitations"}), 500
+
+        # Return success response
+        return jsonify({
+            "success": True,
+            "message": "Invitations saved successfully",
+            "sentCount": 1,
+            "receivedCount": 1
+        }), 200
+
+    except ValueError as ve:
+        logger.error(f"Validation error: {str(ve)}")
+        return jsonify({"error": str(ve)}), 400
+    except Exception as e:
+        logger.error(f"Error saving invitations: {str(e)}")
+        return jsonify({"error": f"Failed to save invitations: {str(e)}"}), 500
 
 
 if __name__ == '__main__':
