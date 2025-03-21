@@ -17,8 +17,7 @@ def search_profiles_by_info(first_name=None, last_name=None, email=None, phone=N
     """
     Function to search for profiles matching any combination of:
     first name, last name, email, and phone number, or fetch all profiles if no parameters are provided.
-    Returns all matching profiles without a similarity threshold.
-    Search order: email (direct lookup), then last name, then first name, then all profiles if no filters.
+    Returns profiles sorted by relevance score, with highest matches first.
     
     Args:
         first_name (str, optional): First name to search for
@@ -28,7 +27,7 @@ def search_profiles_by_info(first_name=None, last_name=None, email=None, phone=N
         db: Firestore database instance
         
     Returns:
-        list: List of all matching profile data containing email, first name, last name, phone, and profile image
+        list: List of all matching profile data sorted by relevance score (highest first)
     """
     
     try:
@@ -56,6 +55,7 @@ def search_profiles_by_info(first_name=None, last_name=None, email=None, phone=N
             print(f"Normalized phone: {phone}")
         
         matches = []
+        scored_matches = []
         
         # Step 1: If email is provided, do a direct lookup
         if email:
@@ -79,107 +79,78 @@ def search_profiles_by_info(first_name=None, last_name=None, email=None, phone=N
                     "firstName": profile.get('firstName'),
                     "lastName": profile.get('lastName'),
                     "phone": profile.get('phone'),
-                    "profileImage": profile_image_base64
+                    "profileImage": profile_image_base64,
+                    "matchScore": 100  # Perfect match score for exact email
                 })
                 print(f"Email match found: {email}")
-                return matches  # Return immediately if email matches
+                return matches  # Return immediately if email matches, as it's already perfect match
         
-        # Step 2: Search by last name if provided
-        if last_name:
-            print(f"Querying profiles by last_name: {last_name}")
-            
-            # Get all documents first
-            all_docs = db.collection('user_profiles').stream()
-            
-            # Then filter by lowercase comparison
-            for doc in all_docs:
-                profile = doc.to_dict()
-                doc_last_name = profile.get('lastName', '').lower().strip()
-                
-                if doc_last_name == last_name:
-                    profile_email = doc.id
-                    
-                    # Get profile image
-                    profile_image_base64 = None
-                    current_image_id = profile.get('currentProfileImageId')
-                    
-                    if current_image_id:
-                        print(f"Fetching profile image with ID: {current_image_id} for email: {profile_email}")
-                        image_doc = db.collection('user_profiles').document(profile_email).collection('profileImages').document(current_image_id).get()
-                        if image_doc.exists:
-                            profile_image_base64 = image_doc.to_dict().get('imageData')
-                    
-                    matches.append({
-                        "email": profile_email,
-                        "firstName": profile.get('firstName'),
-                        "lastName": profile.get('lastName'),
-                        "phone": profile.get('phone'),
-                        "profileImage": profile_image_base64
-                    })
-                    print(f"Last name match found: {profile_email}")
+        # Create a collection of all profiles to score
+        all_profiles = []
         
-        # Step 3: Search by first name if provided (and no exact email match)
-        if first_name and not (email and matches):
-            print(f"Querying profiles by first_name: {first_name}")
-            
-            # Get all documents if we haven't already (for last name)
-            if not last_name:
-                all_docs = db.collection('user_profiles').stream()
-            else:
-                # We already retrieved all_docs for last name, so re-use the generator by recreating it
-                all_docs = db.collection('user_profiles').stream()
-            
-            # Then filter by lowercase comparison
-            for doc in all_docs:
-                profile = doc.to_dict()
-                doc_first_name = profile.get('firstName', '').lower().strip()
-                doc_last_name = profile.get('lastName', '').lower().strip()
-                profile_email = doc.id
-                
-                if doc_first_name == first_name:
-                    # Skip if already matched by last name (avoid duplicates)
-                    if last_name and doc_last_name == last_name:
-                        continue
-                    
-                    # Skip if already in matches
-                    if any(m['email'] == profile_email for m in matches):
-                        continue
-                    
-                    # Get profile image
-                    profile_image_base64 = None
-                    current_image_id = profile.get('currentProfileImageId')
-                    
-                    if current_image_id:
-                        print(f"Fetching profile image with ID: {current_image_id} for email: {profile_email}")
-                        image_doc = db.collection('user_profiles').document(profile_email).collection('profileImages').document(current_image_id).get()
-                        if image_doc.exists:
-                            profile_image_base64 = image_doc.to_dict().get('imageData')
-                    
-                    matches.append({
-                        "email": profile_email,
-                        "firstName": profile.get('firstName'),
-                        "lastName": profile.get('lastName'),
-                        "phone": profile.get('phone'),
-                        "profileImage": profile_image_base64
-                    })
-                    print(f"First name match found: {profile_email}")
+        # Fetch all profiles
+        all_docs = db.collection('user_profiles').stream()
+        for doc in all_docs:
+            profile = doc.to_dict()
+            profile_email = doc.id
+            profile_data = {
+                "email": profile_email,
+                "firstName": profile.get('firstName', ''),
+                "lastName": profile.get('lastName', ''),
+                "phone": profile.get('phone', ''),
+                "currentProfileImageId": profile.get('currentProfileImageId')
+            }
+            all_profiles.append(profile_data)
         
-        # Step 4: Search by phone if provided (and no exact email match)
-        if phone and not (email and matches):
-            print(f"Querying profiles by phone: {phone}")
-            phone_query = db.collection('user_profiles').where('phone', '==', phone).stream()
+        # Score and filter profiles
+        for profile in all_profiles:
+            score = 0
+            match_reasons = []
             
-            for doc in phone_query:
-                profile = doc.to_dict()
-                profile_email = doc.id
-                
-                # Avoid duplicates if already matched by name
-                if any(m['email'] == profile_email for m in matches):
-                    continue
+            profile_first_name = profile["firstName"].lower().strip() if profile["firstName"] else ""
+            profile_last_name = profile["lastName"].lower().strip() if profile["lastName"] else ""
+            profile_email = profile["email"].lower().strip()
+            profile_phone = ''.join(filter(str.isdigit, profile["phone"])) if profile["phone"] else ""
+            
+            # Score by field matches
+            if email and email == profile_email:
+                score += 50
+                match_reasons.append("email_exact")
+            
+            if last_name and last_name == profile_last_name:
+                score += 30
+                match_reasons.append("last_name_exact")
+            
+            if first_name and first_name == profile_first_name:
+                score += 20
+                match_reasons.append("first_name_exact")
+            
+            if phone and phone == profile_phone:
+                score += 40
+                match_reasons.append("phone_exact")
+            
+            # Add partial matching (can be improved with better string matching algorithm)
+            if email and not "email_exact" in match_reasons and email in profile_email:
+                score += 10
+                match_reasons.append("email_partial")
+            
+            if last_name and not "last_name_exact" in match_reasons and last_name in profile_last_name:
+                score += 8
+                match_reasons.append("last_name_partial")
+            
+            if first_name and not "first_name_exact" in match_reasons and first_name in profile_first_name:
+                score += 5
+                match_reasons.append("first_name_partial")
+            
+            # Only include profiles with a score > 0 or if no search criteria provided
+            if score > 0 or not (first_name or last_name or email or phone):
+                if not (first_name or last_name or email or phone):
+                    # If no criteria provided, give base score for sorting
+                    score = 1
                 
                 # Get profile image
                 profile_image_base64 = None
-                current_image_id = profile.get('currentProfileImageId')
+                current_image_id = profile.get("currentProfileImageId")
                 
                 if current_image_id:
                     print(f"Fetching profile image with ID: {current_image_id} for email: {profile_email}")
@@ -187,52 +158,40 @@ def search_profiles_by_info(first_name=None, last_name=None, email=None, phone=N
                     if image_doc.exists:
                         profile_image_base64 = image_doc.to_dict().get('imageData')
                 
-                matches.append({
+                scored_matches.append({
                     "email": profile_email,
-                    "firstName": profile.get('firstName'),
-                    "lastName": profile.get('lastName'),
-                    "phone": phone,
-                    "profileImage": profile_image_base64
+                    "firstName": profile["firstName"],
+                    "lastName": profile["lastName"],
+                    "phone": profile["phone"],
+                    "profileImage": profile_image_base64,
+                    "matchScore": score,
+                    "matchReasons": match_reasons
                 })
-                print(f"Phone match found: {profile_email}")
+                print(f"Match found: {profile_email}, Score: {score}, Reasons: {match_reasons}")
         
-        # Step 5: If no parameters provided, fetch all profiles
-        if not (first_name or last_name or email or phone):
-            print("No search parameters provided, fetching all profiles")
-            all_profiles_query = db.collection('user_profiles').stream()
-            
-            for doc in all_profiles_query:
-                profile = doc.to_dict()
-                profile_email = doc.id  # Document ID is the email
-                
-                # Get profile image
-                profile_image_base64 = None
-                current_image_id = profile.get('currentProfileImageId')
-                
-                if current_image_id:
-                    print(f"Fetching profile image with ID: {current_image_id} for email: {profile_email}")
-                    image_doc = db.collection('user_profiles').document(profile_email).collection('profileImages').document(current_image_id).get()
-                    if image_doc.exists:
-                        profile_image_base64 = image_doc.to_dict().get('imageData')
-                
-                matches.append({
-                    "email": profile_email,
-                    "firstName": profile.get('firstName'),
-                    "lastName": profile.get('lastName'),
-                    "phone": profile.get('phone'),
-                    "profileImage": profile_image_base64
-                })
-                # Print document ID (email), firstName, and lastName
-                print(f"Profile found - ID: {profile_email}, FirstName: {profile.get('firstName')}, LastName: {profile.get('lastName')}")
-
+        # Sort by match score in descending order
+        sorted_matches = sorted(scored_matches, key=lambda x: x["matchScore"], reverse=True)
+        
+        # Remove score and match_reasons from the final result if not needed in the response
+        final_matches = []
+        for match in sorted_matches:
+            final_match = {
+                "email": match["email"],
+                "firstName": match["firstName"],
+                "lastName": match["lastName"],
+                "phone": match["phone"],
+                "profileImage": match["profileImage"]
+            }
+            final_matches.append(final_match)
+        
         # Log total matches
-        print(f"Total matches found: {len(matches)}")
-        return matches
+        print(f"Total matches found: {len(final_matches)}")
+        return final_matches
     
     except Exception as e:
         logger.error(f"Error searching profiles: {e}")
         print(f"Exception occurred: {e}")
-        raise e  
+        raise e
 
 def calculate_similarity(str1, str2):
     """Optimized similarity calculation (kept for potential future use)"""
