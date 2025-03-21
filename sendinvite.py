@@ -49,8 +49,9 @@ def save_sent_invitation(sent_invitation,user_profiles_ref):
 
         # Create document ID: timestamp_senderEmail
         sender_email = sent_invitation['senderEmail']
+        recit_email=sent_invitation["recipientEmail"]
         timestamp_formatted = timestamp.strftime('%Y%m%d%H%M%S%f')  # Format: YYYYMMDDHHMMSSmicroseconds
-        doc_id = f"{timestamp_formatted}_{sender_email.replace('@', '_at_')}"  # Replace @ with _at_ to avoid invalid characters
+        doc_id = f"{timestamp_formatted}_{recit_email.replace('@', '_at_')}"  # Replace @ with _at_ to avoid invalid characters
 
         # Add the invitation type and document ID to the data
         invitation_data = sent_invitation.copy()
@@ -100,8 +101,9 @@ def save_received_invitation(received_invitation,user_profiles_ref):
 
         # Create document ID: timestamp_recipientEmail
         recipient_email = received_invitation['recipientEmail']
+        sender_email=received_invitation["senderEmail"]
         timestamp_formatted = timestamp.strftime('%Y%m%d%H%M%S%f')  # Format: YYYYMMDDHHMMSSmicroseconds
-        doc_id = f"{timestamp_formatted}_{recipient_email.replace('@', '_at_')}"  # Replace @ with _at_ to avoid invalid characters
+        doc_id = f"{timestamp_formatted}_{sender_email.replace('@', '_at_')}"  # Replace @ with _at_ to avoid invalid characters
 
         # Add the invitation type and document ID to the data
         invitation_data = received_invitation.copy()
