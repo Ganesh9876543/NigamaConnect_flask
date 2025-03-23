@@ -115,7 +115,9 @@ def generate_family_tree(family_data):
             parent = next((p for p in family_data if p['id'] == member['parentId']), None)
             
             # Generate different line styles based on birth order
-            birth_order = member.get('birthOrder', 0)
+            birth_order = member.get('birthOrder', 0)  # Default to 0 if birthOrder is None
+            if birth_order is None:
+                birth_order = 0  # Ensure a fallback value is set
             line_styles = ["solid", "dashed", "dotted"]
             line_style = line_styles[birth_order % len(line_styles)]
             
