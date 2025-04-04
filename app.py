@@ -189,6 +189,7 @@ try:
         firebase_app = initialize_app(cred)
         db = firestore.client()
         user_profiles_ref = db.collection('user_profiles')
+        family_tree_ref = db.collection('family_tree')  # Top-level collection
         logger.info("Firebase initialized successfully")
     else:
         raise FileNotFoundError(f"Secret file not found at: {secret_file_path}")
@@ -953,6 +954,126 @@ def save_invitations():
         logger.error(f"Error saving invitations: {str(e)}")
         return jsonify({"error": f"Failed to save invitations: {str(e)}"}), 500
 
+@app.route('/api/family-tree/update', methods=['POST'])
+def update_family_tree():
+    """
+    API endpoint to update or create a family tree.
+    Receives email and family members data.
+    Checks if a family tree ID exists for the email, and updates or creates a new document.
+    """
+    try:
+        data = request.json
+        email = data.get('email')
+        family_members = data.get('familyMembers')
+        
+        if not email or not family_members:
+            return jsonify({
+                "success": False,
+                "error": "Email and family members data are required"
+            }), 400
+            
+        logger.info(f"Received family tree update request for email: {email}")
+        
+        # Check if family tree ID exists for the email in user profiles
+        user_doc = user_profiles_ref.document(email).get()
+        family_tree_id = None
+        
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            family_tree_id = user_data.get('familyTreeId')
+        
+        # If family tree ID doesn't exist, create a new one
+        if not family_tree_id:
+            # Create a new family tree ID based on email and timestamp
+            timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+            hash_input = f"{email}_{timestamp}"
+            family_tree_id = hashlib.md5(hash_input.encode()).hexdigest()
+            
+            # Update user profile with the new family tree ID
+            user_profiles_ref.document(email).set({
+                'familyTreeId': family_tree_id,
+                'updatedAt': datetime.now().isoformat()
+            }, merge=True)
+            
+            logger.info(f"Created new family tree ID for {email}: {family_tree_id}")
+        
+        # Update or create the family tree document in the separate family_tree collection
+        family_tree_ref.document(family_tree_id).set({
+            'email': email,
+            'familyMembers': family_members,
+            'updatedAt': datetime.now().isoformat(),
+            'createdAt': datetime.now().isoformat()
+        }, merge=True)
+        
+        return jsonify({
+            "success": True,
+            "message": "Family tree updated successfully",
+            "familyTreeId": family_tree_id
+        })
+    
+    except Exception as e:
+        logger.error(f"Error updating family tree: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/family-tree/get', methods=['GET'])
+def get_family_tree():
+    """
+    API endpoint to fetch family tree data using email.
+    Returns family tree data if it exists, otherwise returns false.
+    """
+    try:
+        # Get email from query parameter
+        email = request.args.get('email')
+        
+        if not email:
+            return jsonify({
+                "success": False,
+                "error": "Email parameter is required"
+            }), 400
+            
+        logger.info(f"Received request to fetch family tree for email: {email}")
+        
+        # Check if family tree ID exists for the email in user profiles
+        user_doc = user_profiles_ref.document(email).get()
+        family_tree_id = None
+        
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            family_tree_id = user_data.get('familyTreeId')
+        
+        # If no family tree ID found, return false
+        if not family_tree_id:
+            return jsonify({
+                "success": False,
+                "message": "No family tree found for this email"
+            }), 404
+        
+        # Fetch family tree data using the ID
+        family_tree_doc = family_tree_ref.document(family_tree_id).get()
+        
+        if not family_tree_doc.exists:
+            return jsonify({
+                "success": False,
+                "message": "Family tree document not found"
+            }), 404
+        
+        # Return the family tree data
+        family_tree_data = family_tree_doc.to_dict()
+        
+        return jsonify({
+            "success": True,
+            "familyTree": family_tree_data
+        })
+    
+    except Exception as e:
+        logger.error(f"Error fetching family tree: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 if __name__ == '__main__':
     print("Starting Flask server...")
