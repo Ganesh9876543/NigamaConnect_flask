@@ -1075,6 +1075,66 @@ def get_family_tree():
             "error": str(e)
         }), 500
 
+
+@app.route('/api/family-tree/add-member', methods=['POST'])
+def add_member():
+    """
+    API endpoint to add a member to a family tree.
+    Takes two emails: main user and secondary user.
+    Fetches the family tree ID from the main user and updates the secondary user's family tree.
+    """
+    try:
+        data = request.json
+        main_user_email = data.get('mainUserEmail')
+        secondary_user_email = data.get('secondaryUserEmail')
+
+        if not main_user_email or not secondary_user_email:
+            return jsonify({
+                "success": False,
+                "error": "Both main user email and secondary user email are required"
+            }), 400
+
+        logger.info(f"Received request to add member from {main_user_email} to {secondary_user_email}")
+
+        # Fetch family tree ID from the main user's profile
+        main_user_doc = user_profiles_ref.document(main_user_email).get()
+        
+        if not main_user_doc.exists:
+            return jsonify({
+                "success": False,
+                "message": "Main user not found"
+            }), 404
+
+        main_user_data = main_user_doc.to_dict()
+        family_tree_id = main_user_data.get('familyTreeId')
+
+        if not family_tree_id:
+            return jsonify({
+                "success": False,
+                "message": "No family tree found for the main user"
+            }), 404
+
+      
+
+        # Update the secondary user's profile with the family tree ID
+        user_profiles_ref.document(secondary_user_email).set({
+            'familyTreeId': family_tree_id,
+            'updatedAt': datetime.now().isoformat()
+        }, merge=True)
+
+        return jsonify({
+            "success": True,
+            "message": "Family tree updated for the secondary user",
+            "familyTreeId": family_tree_id
+        })
+
+    except Exception as e:
+        logger.error(f"Error adding member to family tree: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 if __name__ == '__main__':
     print("Starting Flask server...")
     app.run(host='0.0.0.0', port=5000, debug=True)
