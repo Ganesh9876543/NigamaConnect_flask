@@ -1065,7 +1065,8 @@ def get_family_tree():
         
         return jsonify({
             "success": True,
-            "familyTree": family_tree_data
+            "familyTree": family_tree_data,
+            "familyTreeId": family_tree_id
         })
     
     except Exception as e:
@@ -1074,7 +1075,6 @@ def get_family_tree():
             "success": False,
             "error": str(e)
         }), 500
-
 
 @app.route('/api/family-tree/add-member', methods=['POST'])
 def add_member():
@@ -1135,6 +1135,53 @@ def add_member():
             "error": str(e)
         }), 500
 
+@app.route('/api/family-tree/update-members', methods=['POST'])
+def update_family_tree_members():
+    """
+    API endpoint to update family tree IDs for each member in the family tree.
+    Takes family members data and a family tree ID.
+    Updates the family tree ID for each member based on their email.
+    """
+    try:
+        data = request.json
+        family_members = data.get('familyMembers', [])
+        new_family_tree_id = data.get('familyTreeId')
+
+        if not family_members or not new_family_tree_id:
+            return jsonify({
+                "success": False,
+                "error": "Family members data and family tree ID are required"
+            }), 400
+
+        logger.info(f"Received request to update family tree members with ID: {new_family_tree_id}")
+
+        for member in family_members:
+            email = member.get('email')
+            if email:
+                # Fetch the user document for the member
+                user_doc = user_profiles_ref.document(email).get()
+
+                if user_doc.exists:
+                    # Update the family tree ID for this member
+                    user_profiles_ref.document(email).set({
+                        'familyTreeId': new_family_tree_id,
+                        'updatedAt': datetime.now().isoformat()
+                    }, merge=True)
+                    logger.info(f"Updated family tree ID for {email} to {new_family_tree_id}")
+                else:
+                    logger.warning(f"User with email {email} not found. Skipping update.")
+
+        return jsonify({
+            "success": True,
+            "message": "Family tree IDs updated successfully for all members"
+        })
+
+    except Exception as e:
+        logger.error(f"Error updating family tree members: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 if __name__ == '__main__':
     print("Starting Flask server...")
     app.run(host='0.0.0.0', port=5000, debug=True)
