@@ -1182,6 +1182,10 @@ def update_family_tree_members():
             "success": False,
             "error": str(e)
         }), 500
+        
+
+
+        
 
 import json
 @app.route('/api/family-tree/add-spouse', methods=['POST'])
@@ -1195,31 +1199,19 @@ def add_spouse_details():
     try:
         # Extract data from the request
         data = request.json
-        print("Received data:", data)  # Log incoming data for debugging
+        print("Received data:", data)
 
         # Extract fields from request
-        res = data.get('wifeFamilyTreeId')
-        wife_family_tree_id = res["wifeFamilyTreeId"]
-        wife_email = res["wifeEmail"]
-        wife_node_id = res['wifeNodeId']
-        husband_family_tree_id = res['husbandFamilyTreeId']
-        husband_email = res['husbandEmail']
-        husband_node_id = res['husbandMemberId']
+        wife_family_tree_id = data.get("wifeFamilyTreeId")
+        wife_email = data.get("wifeEmail")
+        wife_node_id = data.get('wifeNodeId')
+        husband_family_tree_id = data.get('husbandFamilyTreeId')
+        husband_email = data.get('husbandEmail')
+        husband_node_id = data.get('husbandMemberId')
         
-        # Log received fields
-        print(f"Received request to add spouse details: "
-              f"Wife Tree ID: {wife_family_tree_id}, "
-              f"Wife Email: {wife_email}, "
-              f"Wife Node ID: {wife_node_id}, "
-              f"Husband Tree ID: {husband_family_tree_id}, "
-              f"Husband Email: {husband_email}, "
-              f"Husband Node ID: {husband_node_id}")
-
-        # Fetch user profiles to get first and last names
-        # --- Fetch wife's profile ---
+        # Fetch user profiles
         wife_profile_doc = user_profiles_ref.document(wife_email).get() if wife_email else None
         if not wife_profile_doc or not wife_profile_doc.exists:
-            print(f"Error: Wife profile not found for email {wife_email}")
             return jsonify({
                 "success": False,
                 "message": f"Wife profile not found for email {wife_email}"
@@ -1227,101 +1219,82 @@ def add_spouse_details():
         wife_profile = wife_profile_doc.to_dict()
         wife_first_name = wife_profile.get('firstName', 'Unknown')
         wife_last_name = wife_profile.get('lastName', 'Unknown')
+        current_image_id = wife_profile.get('currentProfileImageId')
+        wife_profile_data = user_profiles_ref.document(wife_email)\
+                      .collection('profileImages')\
+                      .document(current_image_id)\
+                      .get()
+                      
+        wife_image_data = wife_profile_data.to_dict().get('imageData')
+        
 
-        # --- Fetch husband's profile ---
         husband_profile_doc = user_profiles_ref.document(husband_email).get() if husband_email else None
         if not husband_profile_doc or not husband_profile_doc.exists:
-            print(f"Error: Husband profile not found for email {husband_email}")
             return jsonify({
                 "success": False,
                 "message": f"Husband profile not found for email {husband_email}"
             }), 404
         husband_profile = husband_profile_doc.to_dict()
         husband_first_name = husband_profile.get('firstName', 'Unknown')
-        husband_last_name = husband_profile.get('lastName', 'Doe')  # Default last name
+        husband_last_name = husband_profile.get('lastName', 'Doe')
+        hus_current_image_id = husband_profile.get('currentProfileImageId')
+        hus_profile_data = user_profiles_ref.document(husband_email)\
+                      .collection('profileImages')\
+                      .document(hus_current_image_id)\
+                      .get()
+                      
+        husband_image_data = hus_profile_data.to_dict().get('imageData')
 
-        # Helper function to extract mini-tree of parents and siblings
-        def extract_mini_tree(family_members_list, member_id, spouse_family_members_list=None, spouse_node_id=None):
-            """
-            Extract a mini family tree containing:
-            1. The member themselves
-            2. Their spouse (potentially from a different family tree)
-            3. Parents and siblings of the specified member
-            4. Spouses of siblings
-            Also marks the member as 'self: true' and all others as 'self: false'
-            
-            Parameters:
-            - family_members_list: The list of family members
-            - member_id: The ID of the member in their family tree
-            - spouse_family_members_list: Optional list of family members of the spouse (if in a different tree)
-            - spouse_node_id: Optional node ID of the spouse in their tree
-            """
-            # Convert list to dictionary for easier lookups
-            members = {member.get('id'): member for member in family_members_list}
+        # Helper function to create complete mini-tree with spouse
+        def create_complete_mini_tree(member_list, member_id, spouse_details=None):
+            members = {member.get('id'): member for member in member_list}
             if member_id not in members:
                 return {}
-                    
+            
             member = members[member_id]
-            # Add the member themselves with self: true
             mini_tree = {
                 member_id: {**member, "isSelf": True}
             }
             
-            # Add spouse - checking both same tree and different tree scenarios
-            spouse_id = member.get('spouse')
+            # Add spouse if provided
+            if spouse_details:
+                spouse_id = f"spouse_{member_id}"
+                mini_tree[spouse_id] = {
+                    **spouse_details,
+                    "id": spouse_id,
+                    "isSelf": False,
+                    "spouse": member_id
+                }
+                mini_tree[member_id]["spouse"] = spouse_id
             
-            # Case 1: Spouse ID exists and is in the same tree
-            if spouse_id and spouse_id in members:
-                mini_tree[spouse_id] = {**members[spouse_id], "isSelf": False}
-            
-            # Case 2: Spouse is in a different tree (using provided parameters)
-            elif spouse_node_id and spouse_family_members_list:
-                spouse_members = {member.get('id'): member for member in spouse_family_members_list}
-                if spouse_node_id in spouse_members:
-                    spouse_details = spouse_members[spouse_node_id]
-                    # Use a consistent ID for the spouse in the mini-tree
-                    mini_tree_spouse_id = "spouse_" + spouse_node_id
-                    mini_tree[mini_tree_spouse_id] = {**spouse_details, "isSelf": False}
-                    # Update the member's spouse reference to point to this ID
-                    mini_tree[member_id]["spouse"] = mini_tree_spouse_id
-            
-            # Add parents if available
+            # Add parents
             parent_id = member.get('parentId')
             if parent_id and parent_id in members:
                 mini_tree[parent_id] = {**members[parent_id], "isSelf": False}
                 
-                # Add parent's spouse if available
-                parent = members[parent_id]
-                parent_spouse_id = parent.get('spouse')
+                # Add parent's spouse
+                parent_spouse_id = members[parent_id].get('spouse')
                 if parent_spouse_id and parent_spouse_id in members:
                     mini_tree[parent_spouse_id] = {**members[parent_spouse_id], "isSelf": False}
             
-            # Find and add siblings (members with same parentId) and their spouses
+            # Add siblings and their spouses
             if parent_id:
                 for node_id, node in members.items():
                     if node.get('parentId') == parent_id and node_id != member_id:
-                        # Add the sibling
                         mini_tree[node_id] = {**node, "isSelf": False}
                         
-                        # Add sibling's spouse if available in the same tree
                         sibling_spouse_id = node.get('spouse')
                         if sibling_spouse_id and sibling_spouse_id in members:
                             mini_tree[sibling_spouse_id] = {**members[sibling_spouse_id], "isSelf": False}
             
             return mini_tree
 
-        # --- Scenario 1: Neither wife nor husband has a family tree ---
+        # --- Scenario 1: Neither has family tree ---
         if not wife_family_tree_id and not husband_family_tree_id:
-            print("Scenario 1: Neither wife nor husband has a family tree")
-            # Create a new family tree for the husband
-            new_family_tree_id = str(uuid.uuid4())  # Generate unique ID
-            print(f"Creating new family tree with ID: {new_family_tree_id}")
+            new_family_tree_id = str(uuid.uuid4())
+            husband_node_id = "1"
+            wife_node_id = "2"
 
-            # Initialize family members
-            husband_node_id = "1"  # Start with node ID 1
-            wife_node_id = "2"     # Wife gets node ID 2
-
-            # Define husband and wife details
             husband_details = {
                 "id": husband_node_id,
                 "name": f"{husband_first_name} {husband_last_name}",
@@ -1330,10 +1303,10 @@ def add_spouse_details():
                 "email": husband_email,
                 "phone": husband_profile.get('phone', ''),
                 "gender": "male",
-                "generation": 0,  # Assuming same generation
+                "generation": 0,
                 "parentId": None,
                 "spouse": wife_node_id,
-                "profileImage": husband_profile.get('profileImage', ''),
+                "profileImage":husband_image_data,
                 "birthOrder": 1,
                 "isSelf": True
             }
@@ -1341,26 +1314,23 @@ def add_spouse_details():
                 "id": wife_node_id,
                 "name": f"{wife_first_name} {husband_last_name}",
                 "firstName": wife_first_name,
-                "lastName": husband_last_name,  # Wife takes husband's last name
+                "lastName": husband_last_name,
                 "email": wife_email,
                 "phone": wife_profile.get('phone', ''),
                 "gender": "female",
                 "generation": 0,
                 "parentId": None,
                 "spouse": husband_node_id,
-                "profileImage": wife_profile.get('profileImage', ''),
+                "profileImage":wife_image_data,
                 "birthOrder": 1,
                 "isSelf": False
             }
 
-            # Save new family tree with family members as a list
             family_tree_ref.document(new_family_tree_id).set({
                 "familyMembers": [husband_details, wife_details],
-                "relatives": {}  # Initialize empty relatives
+                "relatives": {}
             })
-            print(f"New family tree created with husband and wife: {new_family_tree_id}")
 
-            # Update user profiles
             user_profiles_ref.document(wife_email).set({
                 "familyTreeId": new_family_tree_id,
                 "oldFamilyTreeId": None,
@@ -1374,54 +1344,54 @@ def add_spouse_details():
                 "maritalStatus": "Married",
                 "updatedAt": datetime.now().isoformat()
             }, merge=True)
-            print("Updated user profiles for both wife and husband")
 
             return jsonify({
                 "success": True,
-                "message": "New family tree created and spouse details added",
-                "familyTreeId": new_family_tree_id,
-                "familyMembers": [husband_details, wife_details]
+                "message": "New family tree created",
+                "familyTreeId": new_family_tree_id
             })
 
-        # --- Scenario 2: Husband has no family tree, wife has one ---
+        # --- Scenario 2: Only wife has family tree ---
         elif not husband_family_tree_id and wife_family_tree_id:
-            print("Scenario 2: Husband has no family tree, wife has one")
-            # Validate wife's family tree
             wife_family_tree_doc = family_tree_ref.document(wife_family_tree_id).get()
             if not wife_family_tree_doc.exists:
-                print(f"Error: Wife's family tree not found: {wife_family_tree_id}")
                 return jsonify({
                     "success": False,
                     "message": f"Wife's family tree not found: {wife_family_tree_id}"
                 }), 404
+                
             wife_family_tree = wife_family_tree_doc.to_dict()
             wife_members_list = wife_family_tree.get('familyMembers', [])
-            
-            # Convert to dict for easier lookup
             wife_members_dict = {member.get('id'): member for member in wife_members_list}
 
-            # Find wife's details (assuming wife_node_id is provided)
             if wife_node_id not in wife_members_dict:
-                print(f"Error: Wife node ID {wife_node_id} not found in family tree")
                 return jsonify({
                     "success": False,
                     "message": f"Wife node ID {wife_node_id} not found"
                 }), 404
+                
             wife_details = wife_members_dict[wife_node_id]
+
+            # Create husband mini-tree with wife included
+            husband_details_for_mini = {
+                "name": f"{husband_first_name} {husband_last_name}",
+                "firstName": husband_first_name,
+                "lastName": husband_last_name,
+                "email": husband_email,
+                "gender": "male",
+                "profileImage": husband_image_data
+            }
             
-            # Extract wife's family mini-tree (parents and siblings)
-            wife_mini_tree = extract_mini_tree(wife_members_list, wife_node_id)
-            print(f"Extracted wife's mini family tree with {len(wife_mini_tree)} members")
+            wife_mini_tree = create_complete_mini_tree(
+                wife_members_list,
+                wife_node_id,
+                spouse_details=husband_details_for_mini
+            )
 
-            # Create new family tree for husband
             new_family_tree_id = str(uuid.uuid4())
-            print(f"Creating new family tree for husband: {new_family_tree_id}")
+            husband_node_id = "1"
+            new_wife_node_id = "2"
 
-            # Assign node IDs
-            husband_node_id = "1"  # Husband starts as node 1
-            new_wife_node_id = "2" # Wife gets node 2 in new tree
-
-            # Define husband and wife details
             husband_details = {
                 "id": husband_node_id,
                 "name": f"{husband_first_name} {husband_last_name}",
@@ -1433,7 +1403,7 @@ def add_spouse_details():
                 "generation": wife_details.get('generation', 0),
                 "parentId": None,
                 "spouse": new_wife_node_id,
-                "profileImage": husband_profile.get('profileImage', ''),
+                "profileImage": husband_image_data,
                 "birthOrder": 1,
                 "isSelf": True
             }
@@ -1441,29 +1411,26 @@ def add_spouse_details():
                 "id": new_wife_node_id,
                 "name": f"{wife_first_name} {husband_last_name}",
                 "firstName": wife_first_name,
-                "lastName": husband_last_name,  # Update to husband's last name
+                "lastName": husband_last_name,
                 "email": wife_email,
                 "phone": wife_details.get('phone', ''),
                 "gender": "female",
                 "generation": wife_details.get('generation', 0),
                 "parentId": None,
                 "spouse": husband_node_id,
-                "profileImage": wife_details.get('profileImage', ''),
+                "profileImage": wife_image_data,
                 "birthOrder": wife_details.get('birthOrder', 1),
                 "isSelf": False
             }
 
-            # Save new family tree with wife's relatives
             family_tree_ref.document(new_family_tree_id).set({
                 "familyMembers": [husband_details, new_wife_details],
                 "relatives": {
-                    new_wife_node_id: wife_mini_tree  # Add wife's family as relatives
+                    new_wife_node_id: wife_mini_tree
                 }
             })
-            print(f"New family tree created with husband and wife: {new_family_tree_id}")
 
-            # Update wife's family tree to reference husband's tree
-            # Create husband mini-tree for wife's family tree
+            # Update wife's original tree with husband's mini-tree
             husband_mini_tree = {
                 "1": {
                     "id": "1",
@@ -1472,8 +1439,9 @@ def add_spouse_details():
                     "lastName": husband_last_name,
                     "email": husband_email,
                     "gender": "male",
-                    "spouse": "2",  # Reference to wife in mini-tree
-                    "profileImage": husband_profile.get('profileImage', '')
+                    "spouse": "2",
+                    "profileImage": husband_image_data,
+                    "isSelf": True
                 },
                 "2": {
                     "id": "2",
@@ -1482,19 +1450,18 @@ def add_spouse_details():
                     "lastName": husband_last_name,
                     "email": wife_email,
                     "gender": "female",
-                    "spouse": "1",  # Reference to husband in mini-tree
-                    "profileImage": wife_details.get('profileImage', '')
+                    "spouse": "1",
+                    "profileImage": wife_image_data,
+                    "isSelf": False
                 }
             }
             
-            # Update wife's tree with husband info
             wife_relatives = wife_family_tree.get('relatives', {})
             wife_relatives[wife_node_id] = husband_mini_tree
             
-            # Update the wife node in the original wife's family tree
             for i, member in enumerate(wife_members_list):
                 if member.get('id') == wife_node_id:
-                    wife_members_list[i]['spouse'] = new_family_tree_id  # Point to new tree
+                    wife_members_list[i]['spouse'] = new_family_tree_id
                     wife_members_list[i]['lastName'] = husband_last_name
                     break
             
@@ -1502,7 +1469,6 @@ def add_spouse_details():
                 "familyMembers": wife_members_list,
                 "relatives": wife_relatives
             })
-            print(f"Updated wife's family tree {wife_family_tree_id} with spouse reference and relatives")
 
             # Update user profiles
             user_profiles_ref.document(wife_email).set({
@@ -1518,22 +1484,17 @@ def add_spouse_details():
                 "maritalStatus": "Married",
                 "updatedAt": datetime.now().isoformat()
             }, merge=True)
-            print("Updated user profiles for both wife and husband")
 
             return jsonify({
                 "success": True,
-                "message": "New family tree created for husband, wife added with relatives, profiles updated",
-                "familyTreeId": new_family_tree_id,
-                "familyMembers": [husband_details, new_wife_details]
+                "message": "New family tree created for husband",
+                "familyTreeId": new_family_tree_id
             })
 
-        # --- Scenario 3: Husband has family tree, wife does not ---
+        # --- Scenario 3: Only husband has family tree ---
         elif husband_family_tree_id and not wife_family_tree_id:
-            print("Scenario 3: Husband has family tree, wife does not")
-            # Validate husband's family tree
             husband_family_tree_doc = family_tree_ref.document(husband_family_tree_id).get()
             if not husband_family_tree_doc.exists:
-                print(f"Error: Husband's family tree not found: {husband_family_tree_id}")
                 return jsonify({
                     "success": False,
                     "message": f"Husband's family tree not found: {husband_family_tree_id}"
@@ -1541,29 +1502,33 @@ def add_spouse_details():
                 
             husband_family_tree = husband_family_tree_doc.to_dict()
             husband_members_list = husband_family_tree.get('familyMembers', [])
-            
-            # Convert to dict for easier lookup
             husband_members_dict = {member.get('id'): member for member in husband_members_list}
 
-            # Verify husband node exists
             if husband_node_id not in husband_members_dict:
-                print(f"Error: Husband node ID {husband_node_id} not found")
                 return jsonify({
                     "success": False,
                     "message": f"Husband node ID {husband_node_id} not found"
                 }), 404
                 
             husband_details = husband_members_dict[husband_node_id]
+
+            # Create wife mini-tree with husband included
+            wife_details_for_mini = {
+                "name": f"{wife_first_name} {husband_last_name}",
+                "firstName": wife_first_name,
+                "lastName": husband_last_name,
+                "email": wife_email,
+                "gender": "female",
+                "profileImage": wife_image_data
+            }
             
-            # Extract husband's family mini-tree (parents and siblings)
-            husband_mini_tree = extract_mini_tree(husband_members_list, husband_node_id)
-            print(f"Extracted husband's mini family tree with {len(husband_mini_tree)} members")
+            husband_mini_tree = create_complete_mini_tree(
+                husband_members_list,
+                husband_node_id,
+                spouse_details=wife_details_for_mini
+            )
 
-            # Generate new node ID for wife
             new_wife_node_id = str(len(husband_members_list) + 1)
-            print(f"Adding wife to husband's family tree with node ID: {new_wife_node_id}")
-
-            # Define wife details
             wife_details = {
                 "id": new_wife_node_id,
                 "name": f"{wife_first_name} {husband_last_name}",
@@ -1575,11 +1540,19 @@ def add_spouse_details():
                 "generation": husband_details.get('generation', 0),
                 "parentId": None,
                 "spouse": husband_node_id,
-                "profileImage": wife_profile.get('profileImage', ''),
+                "profileImage": wife_image_data,
                 "birthOrder": 1,
                 "isSelf": False
             }
 
+            # Update husband's spouse reference
+            for i, member in enumerate(husband_members_list):
+                if member.get('id') == husband_node_id:
+                    husband_members_list[i]['spouse'] = new_wife_node_id
+                    break
+                    
+            husband_members_list.append(wife_details)
+            
             # Create wife's mini-tree for relatives
             wife_mini_tree = {
                 "1": {
@@ -1589,29 +1562,29 @@ def add_spouse_details():
                     "lastName": husband_last_name,
                     "email": wife_email,
                     "gender": "female",
-                    "profileImage": wife_profile.get('profileImage', '')
+                    "profileImage":wife_image_data,
+                    "isSelf": True
+                },
+                "2": {
+                    "id": "2",
+                    "name": f"{husband_first_name} {husband_last_name}",
+                    "firstName": husband_first_name,
+                    "lastName": husband_last_name,
+                    "email": husband_email,
+                    "gender": "male",
+                    "profileImage": husband_image_data,
+                    "isSelf": False,
+                    "spouse": "1"
                 }
             }
             
-            # Get or initialize the relatives section
             husband_relatives = husband_family_tree.get('relatives', {})
-            husband_relatives[husband_node_id] = wife_mini_tree
+            husband_relatives[new_wife_node_id] = wife_mini_tree
             
-            # Update husband's spouse reference and add wife to family members list
-            for i, member in enumerate(husband_members_list):
-                if member.get('id') == husband_node_id:
-                    husband_members_list[i]['spouse'] = new_wife_node_id  # Link husband to wife
-                    break
-                    
-            # Add wife to the family members list
-            husband_members_list.append(wife_details)
-            
-            # Update husband's family tree
             family_tree_ref.document(husband_family_tree_id).set({
                 "familyMembers": husband_members_list,
                 "relatives": husband_relatives
             })
-            print(f"Wife added to husband's family tree: {husband_family_tree_id}")
 
             # Update user profiles
             user_profiles_ref.document(wife_email).set({
@@ -1625,22 +1598,21 @@ def add_spouse_details():
                 "maritalStatus": "Married",
                 "updatedAt": datetime.now().isoformat()
             }, merge=True)
-            print("Updated user profiles for wife and husband")
 
             return jsonify({
                 "success": True,
-                "message": "Wife added to husband's family tree, profiles updated",
-                "familyTreeId": husband_family_tree_id,
-                "familyMembers": husband_members_list
+                "message": "Wife added to husband's family tree",
+                "familyTreeId": husband_family_tree_id
             })
 
         # --- Scenario 4: Both have family trees ---
+        # --- Scenario 4: Both have family trees ---
         else:
             print("Scenario 4: Both wife and husband have family trees")
+            
             # Validate wife's family tree
             wife_family_tree_doc = family_tree_ref.document(wife_family_tree_id).get()
             if not wife_family_tree_doc.exists:
-                print(f"Error: Wife's family tree not found: {wife_family_tree_id}")
                 return jsonify({
                     "success": False,
                     "message": f"Wife's family tree not found: {wife_family_tree_id}"
@@ -1648,13 +1620,9 @@ def add_spouse_details():
                 
             wife_family_tree = wife_family_tree_doc.to_dict()
             wife_members_list = wife_family_tree.get('familyMembers', [])
-            print(f"Wife members list: {wife_members_list}")
-            
-            # Convert to dict for easier lookup
             wife_members_dict = {member.get('id'): member for member in wife_members_list}
             
             if wife_node_id not in wife_members_dict:
-                print(f"Error: Wife node ID {wife_node_id} not found")
                 return jsonify({
                     "success": False,
                     "message": f"Wife node ID {wife_node_id} not found"
@@ -1665,7 +1633,6 @@ def add_spouse_details():
             # Validate husband's family tree
             husband_family_tree_doc = family_tree_ref.document(husband_family_tree_id).get()
             if not husband_family_tree_doc.exists:
-                print(f"Error: Husband's family tree not found: {husband_family_tree_id}")
                 return jsonify({
                     "success": False,
                     "message": f"Husband's family tree not found: {husband_family_tree_id}"
@@ -1673,12 +1640,9 @@ def add_spouse_details():
                 
             husband_family_tree = husband_family_tree_doc.to_dict()
             husband_members_list = husband_family_tree.get('familyMembers', [])
-            
-            # Convert to dict for easier lookup
             husband_members_dict = {member.get('id'): member for member in husband_members_list}
             
             if husband_node_id not in husband_members_dict:
-                print(f"Error: Husband node ID {husband_node_id} not found")
                 return jsonify({
                     "success": False,
                     "message": f"Husband node ID {husband_node_id} not found"
@@ -1686,84 +1650,97 @@ def add_spouse_details():
                 
             husband_details = husband_members_dict[husband_node_id]
             
-            # Extract wife's family mini-tree with husband details from a different tree
-            wife_mini_tree = extract_mini_tree(wife_members_list, wife_node_id, 
-                                            spouse_family_members_list=husband_members_list, 
-                                            spouse_node_id=husband_node_id)
-            print(f"Extracted wife's mini family tree with {len(wife_mini_tree)} members")
-
-            # Extract husband's family mini-tree with wife details from a different tree
-            husband_mini_tree = extract_mini_tree(husband_members_list, husband_node_id,
-                                                spouse_family_members_list=wife_members_list,
-                                                spouse_node_id=wife_node_id)
-            print(f"Extracted husband's mini family tree with {len(husband_mini_tree)} members")
-
-            # Generate new node ID for wife in husband's tree
+            # Create spouse details for mini-trees
+            wife_details_for_husband = {
+                "name": f"{wife_first_name} {husband_last_name}",
+                "firstName": wife_first_name,
+                "lastName": husband_last_name,
+                "email": wife_email,
+                "gender": "female",
+                "profileImage": wife_image_data,
+                "phone": wife_profile.get('phone', '')
+            }
+            
+            husband_details_for_wife = {
+                "name": f"{husband_first_name} {husband_last_name}",
+                "firstName": husband_first_name,
+                "lastName": husband_last_name,
+                "email": husband_email,
+                "gender": "male",
+                "profileImage": husband_image_data,
+                "phone": husband_profile.get('phone', '')
+            }
+            
+            # Create complete mini-trees including spouses
+            wife_mini_tree = create_complete_mini_tree(
+                wife_members_list,
+                wife_node_id,
+                spouse_details=husband_details_for_wife
+            )
+            
+            husband_mini_tree = create_complete_mini_tree(
+                husband_members_list,
+                husband_node_id,
+                spouse_details=wife_details_for_husband
+            )
+            
+            print(f"Created wife mini-tree with {len(wife_mini_tree)} members")
+            print(f"Created husband mini-tree with {len(husband_mini_tree)} members")
+            
+            # Add wife to husband's family tree
             new_wife_node_id = str(len(husband_members_list) + 1)
-            print(f"Adding wife to husband's family tree with node ID: {new_wife_node_id}")
-
-            # Define wife details for husband's tree
             new_wife_details = {
                 "id": new_wife_node_id,
                 "name": f"{wife_first_name} {husband_last_name}",
                 "firstName": wife_first_name,
                 "lastName": husband_last_name,
-                "email": wife_details.get('email', wife_email),
+                "email": wife_email,
                 "phone": wife_details.get('phone', ''),
                 "gender": "female",
                 "generation": wife_details.get('generation', 0),
                 "parentId": None,
                 "spouse": husband_node_id,
-                "profileImage": wife_details.get('profileImage', ''),
+                "profileImage": wife_image_data,
                 "birthOrder": wife_details.get('birthOrder', 1),
                 "isSelf": False
             }
             
-            # Get or initialize the relatives section for husband's tree
-            husband_relatives = husband_family_tree.get('relatives', {})
-            # Add wife's family mini-tree to husband's relatives
-            husband_relatives[husband_node_id] = wife_mini_tree
-            
-            # Update husband's spouse reference and add wife to family members list
+            # Update husband's spouse reference
             for i, member in enumerate(husband_members_list):
                 if member.get('id') == husband_node_id:
                     husband_members_list[i]['spouse'] = new_wife_node_id
                     break
                     
-            # Add wife to the husband's family members list
+            # Add wife to husband's family members
             husband_members_list.append(new_wife_details)
             
+            # Update husband's relatives with wife's mini-tree
+            husband_relatives = husband_family_tree.get('relatives', {})
+            husband_relatives[new_wife_node_id] = wife_mini_tree
+            
             # Update husband's family tree
-            family_tree_ref.document(husband_family_tree_id).set({
+            family_tree_ref.document(husband_family_tree_id).update({
                 "familyMembers": husband_members_list,
                 "relatives": husband_relatives
             })
-            print(f"Wife added to husband's family tree: {husband_family_tree_id}")
-
-            # Get or initialize the relatives section for wife's tree
-            wife_relatives = wife_family_tree.get('relatives', {})
-            wife_relatives[wife_node_id] = husband_mini_tree
             
-            # Generate new node ID for husband in wife's tree
+            # Add husband to wife's family tree
             new_husband_node_id = str(len(wife_members_list) + 1)
-            print(f"Adding husband to wife's family tree with node ID: {new_husband_node_id}")
-            
-            # Define husband details for wife's tree with references to original family tree
             new_husband_details = {
                 "id": new_husband_node_id,
                 "name": f"{husband_first_name} {husband_last_name}",
                 "firstName": husband_first_name,
                 "lastName": husband_last_name,
-                "email": husband_details.get('email', husband_email),
+                "email": husband_email,
                 "phone": husband_details.get('phone', ''),
                 "gender": "male",
                 "generation": husband_details.get('generation', 0),
                 "parentId": None,
                 "spouse": wife_node_id,
-                "profileImage": husband_details.get('profileImage', ''),
+                "profileImage": husband_image_data,
                 "birthOrder": husband_details.get('birthOrder', 1),
-                "husbandNodeIdInFamilyTree": husband_node_id,  # Reference to original node ID
-                "husbandFamilyTreeId": husband_family_tree_id,  # Reference to original family tree ID
+                "husbandNodeIdInFamilyTree": husband_node_id,
+                "husbandFamilyTreeId": husband_family_tree_id,
                 "isSelf": False
             }
             
@@ -1774,35 +1751,38 @@ def add_spouse_details():
                     wife_members_list[i]['lastName'] = husband_last_name
                     break
                     
-            # Add husband to wife's family members list
+            # Add husband to wife's family members
             wife_members_list.append(new_husband_details)
             
-            # Update wife's family tree with both spouse reference and actual husband node
-            family_tree_ref.document(wife_family_tree_id).set({
+            # Update wife's relatives with husband's mini-tree
+            wife_relatives = wife_family_tree.get('relatives', {})
+            wife_relatives[new_husband_node_id] = husband_mini_tree
+            
+            # Update wife's family tree
+            family_tree_ref.document(wife_family_tree_id).update({
                 "familyMembers": wife_members_list,
                 "relatives": wife_relatives
             })
-            print(f"Updated wife's family tree with husband node: {wife_family_tree_id}")
-
+            
             # Update user profiles
-            user_profiles_ref.document(wife_email).set({
+            user_profiles_ref.document(wife_email).update({
                 "familyTreeId": husband_family_tree_id,
                 "oldFamilyTreeId": wife_family_tree_id,
                 "lastName": husband_last_name,
                 "maritalStatus": "Married",
                 "updatedAt": datetime.now().isoformat()
-            }, merge=True)
-            user_profiles_ref.document(husband_email).set({
+            })
+            
+            user_profiles_ref.document(husband_email).update({
                 "maritalStatus": "Married",
                 "updatedAt": datetime.now().isoformat()
-            }, merge=True)
-            print("Updated user profiles for wife and husband")
-
+            })
+            
             return jsonify({
                 "success": True,
-                "message": "Spouse details added successfully with family mini-trees",
+                "message": "Spouse details added successfully with complete family mini-trees",
                 "familyTreeId": husband_family_tree_id,
-                "familyMembers": husband_members_list
+                "wifeFamilyTreeId": wife_family_tree_id
             })
 
     except Exception as e:
@@ -2560,7 +2540,7 @@ def generate_friends_tree(user_email, user_name, user_profile_image, friends_lis
                 shutil.rmtree(temp_dir)
                 print(f"Cleaned up temporary directory: {temp_dir}")
         except Exception as cleanup_error:
-            print(f"Error cleaning up: {cleanup_error}")  
+            print(f"Error cleaning up: {cleanup_error}")     
 
 
 if __name__ == '__main__':
