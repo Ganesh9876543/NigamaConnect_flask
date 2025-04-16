@@ -1182,6 +1182,1387 @@ def update_family_tree_members():
             "success": False,
             "error": str(e)
         }), 500
+
+import json
+@app.route('/api/family-tree/add-spouse', methods=['POST'])
+def add_spouse_details():
+    """
+    API endpoint to add spouse details to family trees.
+    Handles cases where wife and/or husband may or may not have family trees.
+    Creates new family trees as needed and updates user profiles.
+    Also adds mini-trees of each spouse's family to the other's family tree as relatives.
+    """
+    try:
+        # Extract data from the request
+        data = request.json
+        print("Received data:", data)  # Log incoming data for debugging
+
+        # Extract fields from request
+        res = data.get('wifeFamilyTreeId')
+        wife_family_tree_id = res["wifeFamilyTreeId"]
+        wife_email = res["wifeEmail"]
+        wife_node_id = res['wifeNodeId']
+        husband_family_tree_id = res['husbandFamilyTreeId']
+        husband_email = res['husbandEmail']
+        husband_node_id = res['husbandMemberId']
+        
+        # Log received fields
+        print(f"Received request to add spouse details: "
+              f"Wife Tree ID: {wife_family_tree_id}, "
+              f"Wife Email: {wife_email}, "
+              f"Wife Node ID: {wife_node_id}, "
+              f"Husband Tree ID: {husband_family_tree_id}, "
+              f"Husband Email: {husband_email}, "
+              f"Husband Node ID: {husband_node_id}")
+
+        # Fetch user profiles to get first and last names
+        # --- Fetch wife's profile ---
+        wife_profile_doc = user_profiles_ref.document(wife_email).get() if wife_email else None
+        if not wife_profile_doc or not wife_profile_doc.exists:
+            print(f"Error: Wife profile not found for email {wife_email}")
+            return jsonify({
+                "success": False,
+                "message": f"Wife profile not found for email {wife_email}"
+            }), 404
+        wife_profile = wife_profile_doc.to_dict()
+        wife_first_name = wife_profile.get('firstName', 'Unknown')
+        wife_last_name = wife_profile.get('lastName', 'Unknown')
+
+        # --- Fetch husband's profile ---
+        husband_profile_doc = user_profiles_ref.document(husband_email).get() if husband_email else None
+        if not husband_profile_doc or not husband_profile_doc.exists:
+            print(f"Error: Husband profile not found for email {husband_email}")
+            return jsonify({
+                "success": False,
+                "message": f"Husband profile not found for email {husband_email}"
+            }), 404
+        husband_profile = husband_profile_doc.to_dict()
+        husband_first_name = husband_profile.get('firstName', 'Unknown')
+        husband_last_name = husband_profile.get('lastName', 'Doe')  # Default last name
+
+        # Helper function to extract mini-tree of parents and siblings
+        def extract_mini_tree(family_members_list, member_id, spouse_family_members_list=None, spouse_node_id=None):
+            """
+            Extract a mini family tree containing:
+            1. The member themselves
+            2. Their spouse (potentially from a different family tree)
+            3. Parents and siblings of the specified member
+            4. Spouses of siblings
+            Also marks the member as 'self: true' and all others as 'self: false'
+            
+            Parameters:
+            - family_members_list: The list of family members
+            - member_id: The ID of the member in their family tree
+            - spouse_family_members_list: Optional list of family members of the spouse (if in a different tree)
+            - spouse_node_id: Optional node ID of the spouse in their tree
+            """
+            # Convert list to dictionary for easier lookups
+            members = {member.get('id'): member for member in family_members_list}
+            if member_id not in members:
+                return {}
+                    
+            member = members[member_id]
+            # Add the member themselves with self: true
+            mini_tree = {
+                member_id: {**member, "isSelf": True}
+            }
+            
+            # Add spouse - checking both same tree and different tree scenarios
+            spouse_id = member.get('spouse')
+            
+            # Case 1: Spouse ID exists and is in the same tree
+            if spouse_id and spouse_id in members:
+                mini_tree[spouse_id] = {**members[spouse_id], "isSelf": False}
+            
+            # Case 2: Spouse is in a different tree (using provided parameters)
+            elif spouse_node_id and spouse_family_members_list:
+                spouse_members = {member.get('id'): member for member in spouse_family_members_list}
+                if spouse_node_id in spouse_members:
+                    spouse_details = spouse_members[spouse_node_id]
+                    # Use a consistent ID for the spouse in the mini-tree
+                    mini_tree_spouse_id = "spouse_" + spouse_node_id
+                    mini_tree[mini_tree_spouse_id] = {**spouse_details, "isSelf": False}
+                    # Update the member's spouse reference to point to this ID
+                    mini_tree[member_id]["spouse"] = mini_tree_spouse_id
+            
+            # Add parents if available
+            parent_id = member.get('parentId')
+            if parent_id and parent_id in members:
+                mini_tree[parent_id] = {**members[parent_id], "isSelf": False}
+                
+                # Add parent's spouse if available
+                parent = members[parent_id]
+                parent_spouse_id = parent.get('spouse')
+                if parent_spouse_id and parent_spouse_id in members:
+                    mini_tree[parent_spouse_id] = {**members[parent_spouse_id], "isSelf": False}
+            
+            # Find and add siblings (members with same parentId) and their spouses
+            if parent_id:
+                for node_id, node in members.items():
+                    if node.get('parentId') == parent_id and node_id != member_id:
+                        # Add the sibling
+                        mini_tree[node_id] = {**node, "isSelf": False}
+                        
+                        # Add sibling's spouse if available in the same tree
+                        sibling_spouse_id = node.get('spouse')
+                        if sibling_spouse_id and sibling_spouse_id in members:
+                            mini_tree[sibling_spouse_id] = {**members[sibling_spouse_id], "isSelf": False}
+            
+            return mini_tree
+
+        # --- Scenario 1: Neither wife nor husband has a family tree ---
+        if not wife_family_tree_id and not husband_family_tree_id:
+            print("Scenario 1: Neither wife nor husband has a family tree")
+            # Create a new family tree for the husband
+            new_family_tree_id = str(uuid.uuid4())  # Generate unique ID
+            print(f"Creating new family tree with ID: {new_family_tree_id}")
+
+            # Initialize family members
+            husband_node_id = "1"  # Start with node ID 1
+            wife_node_id = "2"     # Wife gets node ID 2
+
+            # Define husband and wife details
+            husband_details = {
+                "id": husband_node_id,
+                "name": f"{husband_first_name} {husband_last_name}",
+                "firstName": husband_first_name,
+                "lastName": husband_last_name,
+                "email": husband_email,
+                "phone": husband_profile.get('phone', ''),
+                "gender": "male",
+                "generation": 0,  # Assuming same generation
+                "parentId": None,
+                "spouse": wife_node_id,
+                "profileImage": husband_profile.get('profileImage', ''),
+                "birthOrder": 1,
+                "isSelf": True
+            }
+            wife_details = {
+                "id": wife_node_id,
+                "name": f"{wife_first_name} {husband_last_name}",
+                "firstName": wife_first_name,
+                "lastName": husband_last_name,  # Wife takes husband's last name
+                "email": wife_email,
+                "phone": wife_profile.get('phone', ''),
+                "gender": "female",
+                "generation": 0,
+                "parentId": None,
+                "spouse": husband_node_id,
+                "profileImage": wife_profile.get('profileImage', ''),
+                "birthOrder": 1,
+                "isSelf": False
+            }
+
+            # Save new family tree with family members as a list
+            family_tree_ref.document(new_family_tree_id).set({
+                "familyMembers": [husband_details, wife_details],
+                "relatives": {}  # Initialize empty relatives
+            })
+            print(f"New family tree created with husband and wife: {new_family_tree_id}")
+
+            # Update user profiles
+            user_profiles_ref.document(wife_email).set({
+                "familyTreeId": new_family_tree_id,
+                "oldFamilyTreeId": None,
+                "lastName": husband_last_name,
+                "maritalStatus": "Married",
+                "updatedAt": datetime.now().isoformat()
+            }, merge=True)
+            user_profiles_ref.document(husband_email).set({
+                "familyTreeId": new_family_tree_id,
+                "oldFamilyTreeId": None,
+                "maritalStatus": "Married",
+                "updatedAt": datetime.now().isoformat()
+            }, merge=True)
+            print("Updated user profiles for both wife and husband")
+
+            return jsonify({
+                "success": True,
+                "message": "New family tree created and spouse details added",
+                "familyTreeId": new_family_tree_id,
+                "familyMembers": [husband_details, wife_details]
+            })
+
+        # --- Scenario 2: Husband has no family tree, wife has one ---
+        elif not husband_family_tree_id and wife_family_tree_id:
+            print("Scenario 2: Husband has no family tree, wife has one")
+            # Validate wife's family tree
+            wife_family_tree_doc = family_tree_ref.document(wife_family_tree_id).get()
+            if not wife_family_tree_doc.exists:
+                print(f"Error: Wife's family tree not found: {wife_family_tree_id}")
+                return jsonify({
+                    "success": False,
+                    "message": f"Wife's family tree not found: {wife_family_tree_id}"
+                }), 404
+            wife_family_tree = wife_family_tree_doc.to_dict()
+            wife_members_list = wife_family_tree.get('familyMembers', [])
+            
+            # Convert to dict for easier lookup
+            wife_members_dict = {member.get('id'): member for member in wife_members_list}
+
+            # Find wife's details (assuming wife_node_id is provided)
+            if wife_node_id not in wife_members_dict:
+                print(f"Error: Wife node ID {wife_node_id} not found in family tree")
+                return jsonify({
+                    "success": False,
+                    "message": f"Wife node ID {wife_node_id} not found"
+                }), 404
+            wife_details = wife_members_dict[wife_node_id]
+            
+            # Extract wife's family mini-tree (parents and siblings)
+            wife_mini_tree = extract_mini_tree(wife_members_list, wife_node_id)
+            print(f"Extracted wife's mini family tree with {len(wife_mini_tree)} members")
+
+            # Create new family tree for husband
+            new_family_tree_id = str(uuid.uuid4())
+            print(f"Creating new family tree for husband: {new_family_tree_id}")
+
+            # Assign node IDs
+            husband_node_id = "1"  # Husband starts as node 1
+            new_wife_node_id = "2" # Wife gets node 2 in new tree
+
+            # Define husband and wife details
+            husband_details = {
+                "id": husband_node_id,
+                "name": f"{husband_first_name} {husband_last_name}",
+                "firstName": husband_first_name,
+                "lastName": husband_last_name,
+                "email": husband_email,
+                "phone": husband_profile.get('phone', ''),
+                "gender": "male",
+                "generation": wife_details.get('generation', 0),
+                "parentId": None,
+                "spouse": new_wife_node_id,
+                "profileImage": husband_profile.get('profileImage', ''),
+                "birthOrder": 1,
+                "isSelf": True
+            }
+            new_wife_details = {
+                "id": new_wife_node_id,
+                "name": f"{wife_first_name} {husband_last_name}",
+                "firstName": wife_first_name,
+                "lastName": husband_last_name,  # Update to husband's last name
+                "email": wife_email,
+                "phone": wife_details.get('phone', ''),
+                "gender": "female",
+                "generation": wife_details.get('generation', 0),
+                "parentId": None,
+                "spouse": husband_node_id,
+                "profileImage": wife_details.get('profileImage', ''),
+                "birthOrder": wife_details.get('birthOrder', 1),
+                "isSelf": False
+            }
+
+            # Save new family tree with wife's relatives
+            family_tree_ref.document(new_family_tree_id).set({
+                "familyMembers": [husband_details, new_wife_details],
+                "relatives": {
+                    new_wife_node_id: wife_mini_tree  # Add wife's family as relatives
+                }
+            })
+            print(f"New family tree created with husband and wife: {new_family_tree_id}")
+
+            # Update wife's family tree to reference husband's tree
+            # Create husband mini-tree for wife's family tree
+            husband_mini_tree = {
+                "1": {
+                    "id": "1",
+                    "name": f"{husband_first_name} {husband_last_name}",
+                    "firstName": husband_first_name,
+                    "lastName": husband_last_name,
+                    "email": husband_email,
+                    "gender": "male",
+                    "spouse": "2",  # Reference to wife in mini-tree
+                    "profileImage": husband_profile.get('profileImage', '')
+                },
+                "2": {
+                    "id": "2",
+                    "name": f"{wife_first_name} {husband_last_name}",
+                    "firstName": wife_first_name,
+                    "lastName": husband_last_name,
+                    "email": wife_email,
+                    "gender": "female",
+                    "spouse": "1",  # Reference to husband in mini-tree
+                    "profileImage": wife_details.get('profileImage', '')
+                }
+            }
+            
+            # Update wife's tree with husband info
+            wife_relatives = wife_family_tree.get('relatives', {})
+            wife_relatives[wife_node_id] = husband_mini_tree
+            
+            # Update the wife node in the original wife's family tree
+            for i, member in enumerate(wife_members_list):
+                if member.get('id') == wife_node_id:
+                    wife_members_list[i]['spouse'] = new_family_tree_id  # Point to new tree
+                    wife_members_list[i]['lastName'] = husband_last_name
+                    break
+            
+            family_tree_ref.document(wife_family_tree_id).set({
+                "familyMembers": wife_members_list,
+                "relatives": wife_relatives
+            })
+            print(f"Updated wife's family tree {wife_family_tree_id} with spouse reference and relatives")
+
+            # Update user profiles
+            user_profiles_ref.document(wife_email).set({
+                "familyTreeId": new_family_tree_id,
+                "oldFamilyTreeId": wife_family_tree_id,
+                "lastName": husband_last_name,
+                "maritalStatus": "Married",
+                "updatedAt": datetime.now().isoformat()
+            }, merge=True)
+            user_profiles_ref.document(husband_email).set({
+                "familyTreeId": new_family_tree_id,
+                "oldFamilyTreeId": None,
+                "maritalStatus": "Married",
+                "updatedAt": datetime.now().isoformat()
+            }, merge=True)
+            print("Updated user profiles for both wife and husband")
+
+            return jsonify({
+                "success": True,
+                "message": "New family tree created for husband, wife added with relatives, profiles updated",
+                "familyTreeId": new_family_tree_id,
+                "familyMembers": [husband_details, new_wife_details]
+            })
+
+        # --- Scenario 3: Husband has family tree, wife does not ---
+        elif husband_family_tree_id and not wife_family_tree_id:
+            print("Scenario 3: Husband has family tree, wife does not")
+            # Validate husband's family tree
+            husband_family_tree_doc = family_tree_ref.document(husband_family_tree_id).get()
+            if not husband_family_tree_doc.exists:
+                print(f"Error: Husband's family tree not found: {husband_family_tree_id}")
+                return jsonify({
+                    "success": False,
+                    "message": f"Husband's family tree not found: {husband_family_tree_id}"
+                }), 404
+                
+            husband_family_tree = husband_family_tree_doc.to_dict()
+            husband_members_list = husband_family_tree.get('familyMembers', [])
+            
+            # Convert to dict for easier lookup
+            husband_members_dict = {member.get('id'): member for member in husband_members_list}
+
+            # Verify husband node exists
+            if husband_node_id not in husband_members_dict:
+                print(f"Error: Husband node ID {husband_node_id} not found")
+                return jsonify({
+                    "success": False,
+                    "message": f"Husband node ID {husband_node_id} not found"
+                }), 404
+                
+            husband_details = husband_members_dict[husband_node_id]
+            
+            # Extract husband's family mini-tree (parents and siblings)
+            husband_mini_tree = extract_mini_tree(husband_members_list, husband_node_id)
+            print(f"Extracted husband's mini family tree with {len(husband_mini_tree)} members")
+
+            # Generate new node ID for wife
+            new_wife_node_id = str(len(husband_members_list) + 1)
+            print(f"Adding wife to husband's family tree with node ID: {new_wife_node_id}")
+
+            # Define wife details
+            wife_details = {
+                "id": new_wife_node_id,
+                "name": f"{wife_first_name} {husband_last_name}",
+                "firstName": wife_first_name,
+                "lastName": husband_last_name,
+                "email": wife_email,
+                "phone": wife_profile.get('phone', ''),
+                "gender": "female",
+                "generation": husband_details.get('generation', 0),
+                "parentId": None,
+                "spouse": husband_node_id,
+                "profileImage": wife_profile.get('profileImage', ''),
+                "birthOrder": 1,
+                "isSelf": False
+            }
+
+            # Create wife's mini-tree for relatives
+            wife_mini_tree = {
+                "1": {
+                    "id": "1",
+                    "name": f"{wife_first_name} {husband_last_name}",
+                    "firstName": wife_first_name,
+                    "lastName": husband_last_name,
+                    "email": wife_email,
+                    "gender": "female",
+                    "profileImage": wife_profile.get('profileImage', '')
+                }
+            }
+            
+            # Get or initialize the relatives section
+            husband_relatives = husband_family_tree.get('relatives', {})
+            husband_relatives[husband_node_id] = wife_mini_tree
+            
+            # Update husband's spouse reference and add wife to family members list
+            for i, member in enumerate(husband_members_list):
+                if member.get('id') == husband_node_id:
+                    husband_members_list[i]['spouse'] = new_wife_node_id  # Link husband to wife
+                    break
+                    
+            # Add wife to the family members list
+            husband_members_list.append(wife_details)
+            
+            # Update husband's family tree
+            family_tree_ref.document(husband_family_tree_id).set({
+                "familyMembers": husband_members_list,
+                "relatives": husband_relatives
+            })
+            print(f"Wife added to husband's family tree: {husband_family_tree_id}")
+
+            # Update user profiles
+            user_profiles_ref.document(wife_email).set({
+                "familyTreeId": husband_family_tree_id,
+                "oldFamilyTreeId": None,
+                "lastName": husband_last_name,
+                "maritalStatus": "Married",
+                "updatedAt": datetime.now().isoformat()
+            }, merge=True)
+            user_profiles_ref.document(husband_email).set({
+                "maritalStatus": "Married",
+                "updatedAt": datetime.now().isoformat()
+            }, merge=True)
+            print("Updated user profiles for wife and husband")
+
+            return jsonify({
+                "success": True,
+                "message": "Wife added to husband's family tree, profiles updated",
+                "familyTreeId": husband_family_tree_id,
+                "familyMembers": husband_members_list
+            })
+
+        # --- Scenario 4: Both have family trees ---
+        else:
+            print("Scenario 4: Both wife and husband have family trees")
+            # Validate wife's family tree
+            wife_family_tree_doc = family_tree_ref.document(wife_family_tree_id).get()
+            if not wife_family_tree_doc.exists:
+                print(f"Error: Wife's family tree not found: {wife_family_tree_id}")
+                return jsonify({
+                    "success": False,
+                    "message": f"Wife's family tree not found: {wife_family_tree_id}"
+                }), 404
+                
+            wife_family_tree = wife_family_tree_doc.to_dict()
+            wife_members_list = wife_family_tree.get('familyMembers', [])
+            print(f"Wife members list: {wife_members_list}")
+            
+            # Convert to dict for easier lookup
+            wife_members_dict = {member.get('id'): member for member in wife_members_list}
+            
+            if wife_node_id not in wife_members_dict:
+                print(f"Error: Wife node ID {wife_node_id} not found")
+                return jsonify({
+                    "success": False,
+                    "message": f"Wife node ID {wife_node_id} not found"
+                }), 404
+                
+            wife_details = wife_members_dict[wife_node_id]
+            
+            # Validate husband's family tree
+            husband_family_tree_doc = family_tree_ref.document(husband_family_tree_id).get()
+            if not husband_family_tree_doc.exists:
+                print(f"Error: Husband's family tree not found: {husband_family_tree_id}")
+                return jsonify({
+                    "success": False,
+                    "message": f"Husband's family tree not found: {husband_family_tree_id}"
+                }), 404
+                
+            husband_family_tree = husband_family_tree_doc.to_dict()
+            husband_members_list = husband_family_tree.get('familyMembers', [])
+            
+            # Convert to dict for easier lookup
+            husband_members_dict = {member.get('id'): member for member in husband_members_list}
+            
+            if husband_node_id not in husband_members_dict:
+                print(f"Error: Husband node ID {husband_node_id} not found")
+                return jsonify({
+                    "success": False,
+                    "message": f"Husband node ID {husband_node_id} not found"
+                }), 404
+                
+            husband_details = husband_members_dict[husband_node_id]
+            
+            # Extract wife's family mini-tree with husband details from a different tree
+            wife_mini_tree = extract_mini_tree(wife_members_list, wife_node_id, 
+                                            spouse_family_members_list=husband_members_list, 
+                                            spouse_node_id=husband_node_id)
+            print(f"Extracted wife's mini family tree with {len(wife_mini_tree)} members")
+
+            # Extract husband's family mini-tree with wife details from a different tree
+            husband_mini_tree = extract_mini_tree(husband_members_list, husband_node_id,
+                                                spouse_family_members_list=wife_members_list,
+                                                spouse_node_id=wife_node_id)
+            print(f"Extracted husband's mini family tree with {len(husband_mini_tree)} members")
+
+            # Generate new node ID for wife in husband's tree
+            new_wife_node_id = str(len(husband_members_list) + 1)
+            print(f"Adding wife to husband's family tree with node ID: {new_wife_node_id}")
+
+            # Define wife details for husband's tree
+            new_wife_details = {
+                "id": new_wife_node_id,
+                "name": f"{wife_first_name} {husband_last_name}",
+                "firstName": wife_first_name,
+                "lastName": husband_last_name,
+                "email": wife_details.get('email', wife_email),
+                "phone": wife_details.get('phone', ''),
+                "gender": "female",
+                "generation": wife_details.get('generation', 0),
+                "parentId": None,
+                "spouse": husband_node_id,
+                "profileImage": wife_details.get('profileImage', ''),
+                "birthOrder": wife_details.get('birthOrder', 1),
+                "isSelf": False
+            }
+            
+            # Get or initialize the relatives section for husband's tree
+            husband_relatives = husband_family_tree.get('relatives', {})
+            # Add wife's family mini-tree to husband's relatives
+            husband_relatives[husband_node_id] = wife_mini_tree
+            
+            # Update husband's spouse reference and add wife to family members list
+            for i, member in enumerate(husband_members_list):
+                if member.get('id') == husband_node_id:
+                    husband_members_list[i]['spouse'] = new_wife_node_id
+                    break
+                    
+            # Add wife to the husband's family members list
+            husband_members_list.append(new_wife_details)
+            
+            # Update husband's family tree
+            family_tree_ref.document(husband_family_tree_id).set({
+                "familyMembers": husband_members_list,
+                "relatives": husband_relatives
+            })
+            print(f"Wife added to husband's family tree: {husband_family_tree_id}")
+
+            # Get or initialize the relatives section for wife's tree
+            wife_relatives = wife_family_tree.get('relatives', {})
+            wife_relatives[wife_node_id] = husband_mini_tree
+            
+            # Generate new node ID for husband in wife's tree
+            new_husband_node_id = str(len(wife_members_list) + 1)
+            print(f"Adding husband to wife's family tree with node ID: {new_husband_node_id}")
+            
+            # Define husband details for wife's tree with references to original family tree
+            new_husband_details = {
+                "id": new_husband_node_id,
+                "name": f"{husband_first_name} {husband_last_name}",
+                "firstName": husband_first_name,
+                "lastName": husband_last_name,
+                "email": husband_details.get('email', husband_email),
+                "phone": husband_details.get('phone', ''),
+                "gender": "male",
+                "generation": husband_details.get('generation', 0),
+                "parentId": None,
+                "spouse": wife_node_id,
+                "profileImage": husband_details.get('profileImage', ''),
+                "birthOrder": husband_details.get('birthOrder', 1),
+                "husbandNodeIdInFamilyTree": husband_node_id,  # Reference to original node ID
+                "husbandFamilyTreeId": husband_family_tree_id,  # Reference to original family tree ID
+                "isSelf": False
+            }
+            
+            # Update wife's spouse reference
+            for i, member in enumerate(wife_members_list):
+                if member.get('id') == wife_node_id:
+                    wife_members_list[i]['spouse'] = new_husband_node_id
+                    wife_members_list[i]['lastName'] = husband_last_name
+                    break
+                    
+            # Add husband to wife's family members list
+            wife_members_list.append(new_husband_details)
+            
+            # Update wife's family tree with both spouse reference and actual husband node
+            family_tree_ref.document(wife_family_tree_id).set({
+                "familyMembers": wife_members_list,
+                "relatives": wife_relatives
+            })
+            print(f"Updated wife's family tree with husband node: {wife_family_tree_id}")
+
+            # Update user profiles
+            user_profiles_ref.document(wife_email).set({
+                "familyTreeId": husband_family_tree_id,
+                "oldFamilyTreeId": wife_family_tree_id,
+                "lastName": husband_last_name,
+                "maritalStatus": "Married",
+                "updatedAt": datetime.now().isoformat()
+            }, merge=True)
+            user_profiles_ref.document(husband_email).set({
+                "maritalStatus": "Married",
+                "updatedAt": datetime.now().isoformat()
+            }, merge=True)
+            print("Updated user profiles for wife and husband")
+
+            return jsonify({
+                "success": True,
+                "message": "Spouse details added successfully with family mini-trees",
+                "familyTreeId": husband_family_tree_id,
+                "familyMembers": husband_members_list
+            })
+
+    except Exception as e:
+        logger.error(f"Error adding spouse details: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+        
+        
+@app.route('/api/family-tree/add-relatives', methods=['POST'])
+def add_relatives():
+    """
+    API endpoint to add relatives to a specific node in a family tree.
+    Takes a family tree ID, node ID, and relatives tree structure.
+    Updates the family tree by adding the relatives to the specified node.
+    """
+    try:
+        # Extract data from the request
+        data = request.json
+        print("Received data:", data)  # Log incoming data for debugging
+
+        # Extract fields from request
+        family_tree_id = data.get('familyTreeId')
+        node_id = data.get('nodeId')
+        relatives_tree = data.get('relativesTree')
+
+        # Validate required fields
+        if not family_tree_id or not node_id or not relatives_tree:
+            print("Error: Missing required fields")
+            return jsonify({
+                "success": False,
+                "message": "Missing required fields. Please provide familyTreeId, nodeId, and relativesTree"
+            }), 400
+
+        # Log received fields
+        print(f"Received request to add relatives: "
+              f"Family Tree ID: {family_tree_id}, "
+              f"Node ID: {node_id}, "
+              f"Relatives count: {len(relatives_tree)}")
+
+        # Validate family tree exists
+        family_tree_doc = family_tree_ref.document(family_tree_id).get()
+        if not family_tree_doc.exists:
+            print(f"Error: Family tree not found: {family_tree_id}")
+            return jsonify({
+                "success": False,
+                "message": f"Family tree not found: {family_tree_id}"
+            }), 404
+        
+        family_tree = family_tree_doc.to_dict()
+        
+        # Debug: Print structure of family tree
+        print(f"Family tree structure: {family_tree.keys()}")
+        
+        # Handle both possible data structures - either directly in familyMembers or as a list
+        family_members = family_tree.get('familyMembers', {})
+        
+        # If family_members is a list, convert to dictionary with id as key
+        if isinstance(family_members, list):
+            family_members_dict = {member.get('id'): member for member in family_members}
+            print(f"Converted list to dict. Available IDs: {list(family_members_dict.keys())}")
+            family_members = family_members_dict
+        
+        # Debug: Print available node IDs
+        print(f"Available node IDs: {list(family_members.keys())}")
+        
+        # Validate node exists in the family tree
+        if node_id not in family_members:
+            print(f"Error: Node ID {node_id} not found in family tree. Available IDs: {list(family_members.keys())}")
+            return jsonify({
+                "success": False,
+                "message": f"Node ID {node_id} not found in the specified family tree",
+                "availableIds": list(family_members.keys())
+            }), 404
+
+        # Get or initialize the relatives section
+        relatives = family_tree.get('relatives', {})
+        
+        # Update or create relatives entry for the specified node
+        relatives[node_id] = relatives_tree
+        
+        # Update the family tree document
+        family_tree_ref.document(family_tree_id).set({
+            "relatives": relatives
+        }, merge=True)
+        
+        print(f"Successfully added relatives to node {node_id} in family tree {family_tree_id}")
+        
+        # Return success response
+        return jsonify({
+            "success": True,
+            "message": f"Relatives added successfully to node {node_id}",
+            "familyTreeId": family_tree_id,
+            "nodeId": node_id,
+            "relativesCount": len(relatives_tree)
+        })
+
+    except Exception as e:
+        logger.error(f"Error adding relatives: {e}")
+        # Add more detailed error information
+       
+        
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            
+        }), 500
+        
+        
+from generate_relatives_tree import generate_relatives_tree
+from flask import jsonify, request
+
+@app.route('/generate-relatives-tree', methods=['POST'])
+def generate_relatives_tree_route():
+    data = request.get_json()
+    relatives_data = data.get('relativesData', {})
+    
+    if not relatives_data:
+        return jsonify({'error': 'No relatives data provided'}), 400
+
+    try:
+        img_base64 = generate_relatives_tree(relatives_data)
+        # Check if the result is an error message (string starting with "Error:")
+        if isinstance(img_base64, str) and img_base64.startswith("Error:"):
+            return jsonify({'error': img_base64}), 500
+        return jsonify({'image': img_base64})
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return jsonify({'error': f"{str(e)}\nDetails: {error_details}"}), 500
+    
+    
+    
+from flask import request, jsonify
+from firebase_admin import firestore
+import logging
+
+
+
+@app.route('/api/friends-tree/add-friend', methods=['POST'])
+def add_friend():
+    """
+    API endpoint to add a friend node to a user's friends tree and vice versa.
+    Takes a user email and a friend node with id, name, category, email, and profileImage.
+    Updates both the user's and friend's friends tree with mutual friendship.
+    """
+    try:
+        # Extract data from the request
+        data = request.json
+        print("Received data:", data)  # Log incoming data for debugging
+
+        # Extract fields from request
+        user_email = data.get('userEmail')
+        friend_node = data.get('friendNode')
+
+        # Validate required fields
+        if not user_email or not friend_node:
+            print("Error: Missing required fields")
+            return jsonify({
+                "success": False,
+                "message": "Missing required fields. Please provide userEmail and friendNode"
+            }), 400
+
+        # Validate friend node structure
+        required_fields = ['id', 'name', 'category', 'email', 'profileImage']
+        if not all(field in friend_node for field in required_fields):
+            print("Error: Invalid friend node structure")
+            return jsonify({
+                "success": False,
+                "message": "Friend node must contain id, name, category, email, and profileImage"
+            }), 400
+
+        # Extract friend's email
+        friend_email = friend_node.get('email')
+        if not friend_email:
+            print("Error: Friend's email is missing in friendNode")
+            return jsonify({
+                "success": False,
+                "message": "Friend's email is required in friendNode"
+            }), 400
+
+        # Log received fields
+        print(f"Received request to add friend: User Email: {user_email}, Friend Node: {friend_node}")
+
+        # Start a transaction to ensure mutual updates
+        @firestore.transactional
+        def update_friends(transaction):
+            # FIRST: Do ALL reads
+            # Get user profile document
+            user_profile_ref = db.collection('user_profiles').document(user_email)
+            user_profile = user_profile_ref.get(transaction=transaction)
+
+            if not user_profile.exists:
+                print(f"Error: User profile not found for email: {user_email}")
+                raise ValueError(f"User profile not found for email: {user_email}")
+
+            # Get friend's profile document
+            friend_profile_ref = db.collection('user_profiles').document(friend_email)
+            friend_profile = friend_profile_ref.get(transaction=transaction)
+
+            if not friend_profile.exists:
+                print(f"Error: Friend profile not found for email: {friend_email}")
+                raise ValueError(f"Friend profile not found for email: {friend_email}")
+
+            # Get user's friends data
+            user_friends_data_ref = user_profile_ref.collection('friendsData').document('friendstree')
+            user_friends_data = user_friends_data_ref.get(transaction=transaction)
+            
+            user_data_dict = user_friends_data.to_dict() if user_friends_data.exists else {}
+            user_friends_list = user_data_dict.get('friends', [])
+
+            # Get friend's friends data
+            friend_friends_data_ref = friend_profile_ref.collection('friendsData').document('friendstree')
+            friend_friends_data = friend_friends_data_ref.get(transaction=transaction)
+            
+            friend_data_dict = friend_friends_data.to_dict() if friend_friends_data.exists else {}
+            friend_friends_list = friend_data_dict.get('friends', [])
+
+            # SECOND: Process user profile data
+            user_profile_data = user_profile.to_dict()
+            
+            # Merge first and last name
+            first_name = user_profile_data.get('firstName', '')
+            last_name = user_profile_data.get('lastName', '')
+            full_name = f"{first_name} {last_name}".strip()
+            if not full_name:
+                full_name = 'Unknown User'
+                
+            # Get profile image
+            profile_image = None
+            profile_image_id = user_profile_data.get('currentProfileImageId')
+            
+            if profile_image_id:
+                # Get the profile image from the profileImages collection
+                profile_image_ref = user_profile_ref.collection('profileImages').document(profile_image_id)
+                profile_image_doc = profile_image_ref.get(transaction=transaction)
+                print(profile_image_id)
+                print(profile_image_doc)
+                
+                if profile_image_doc.exists:
+                    profile_image_data = profile_image_doc.to_dict()
+                    print(profile_image_data)
+                    profile_image = profile_image_data.get('imageData')  # Assuming the image URL is stored in a 'url' field
+            
+            # THIRD: Generate a unique ID for the reciprocal node
+            # Find the maximum ID currently in use and add 1
+            max_id = 0
+            for f in friend_friends_list:
+                try:
+                    id_val = int(f.get('id', 0))
+                    if id_val > max_id:
+                        max_id = id_val
+                except ValueError:
+                    # Skip non-integer IDs
+                    pass
+            
+            new_id = str(max_id + 1)
+            
+            # Create a reciprocal friend node for the user
+            user_node = {
+                'id': new_id,  # Generate a unique ID
+                'name': full_name,
+                'category': friend_node.get('category'),
+                'email': user_email,
+                'profileImage': profile_image
+            }
+            
+            print("user node ", user_node)
+
+            # Add friend to user's friends list if not already there
+            # Check by email to ensure uniqueness
+            if not any(f.get('email') == friend_email for f in user_friends_list):
+                user_friends_list.append(friend_node)
+                transaction.set(user_friends_data_ref, {'friends': user_friends_list}, merge=True)
+                print(f"Added friend {friend_email} to user {user_email}'s friend list")
+            else:
+                print(f"Friend {friend_email} already exists in user {user_email}'s friend list")
+
+            # Add user to friend's friends list if not already there
+            if not any(f.get('email') == user_email for f in friend_friends_list):
+                friend_friends_list.append(user_node)
+                transaction.set(friend_friends_data_ref, {'friends': friend_friends_list}, merge=True)
+                print(f"Added user {user_email} to friend {friend_email}'s friend list")
+            else:
+                print(f"User {user_email} already exists in friend {friend_email}'s friend list")
+
+            print(f"Successfully added mutual friendship: {user_email} ↔ {friend_email}")
+
+        # Execute the transaction
+        transaction = db.transaction()
+        update_friends(transaction)
+
+        # Return success response
+        return jsonify({
+            "success": True,
+            "message": f"Mutual friendship established between {user_email} and {friend_email}",
+            "userEmail": user_email,
+            "friendEmail": friend_email,
+        })
+
+    except Exception as e:
+        print(f"Error adding mutual friendship: {e}")
+        logger.error(f"Error adding mutual friendship: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+        
+
+@app.route('/api/friends-tree/get-friends', methods=['GET'])
+def get_friends():
+    """
+    API endpoint to retrieve a user's friends tree based on email.
+    Returns the list of friends for the specified user.
+    """
+    try:
+        # Get user email from query parameters
+       
+        user_email = request.args.get('email')
+
+        # Validate user email
+        if not user_email:
+            return jsonify({
+                "success": False,
+                "message": "Missing required parameter: email"
+            }), 400
+
+        # Log request
+        print(f"Received request to get friends for user: {user_email}")
+
+        # Get user profile document
+        user_profile_ref = db.collection('user_profiles').document(user_email)
+        user_profile = user_profile_ref.get()
+
+        if not user_profile.exists:
+            print(f"Error: User profile not found for email: {user_email}")
+            return jsonify({
+                "success": False,
+                "message": f"User profile not found for email: {user_email}"
+            }), 404
+
+        # Get user's friends data
+        friends_data_ref = user_profile_ref.collection('friendsData').document('friendstree')
+        friends_data = friends_data_ref.get()
+
+        # If friends data exists, return it, otherwise return empty list
+        if friends_data.exists:
+            friends_list = friends_data.to_dict().get('friends', [])
+        else:
+            friends_list = []
+
+        # Return friends list
+        return jsonify({
+            "success": True,
+            "userEmail": user_email,
+            "friends": friends_list,
+            "totalFriends": len(friends_list)
+        })
+
+    except Exception as e:
+        logger.error(f"Error retrieving friends data: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+        
+
+@app.route('/api/friends-tree/generate-visualization', methods=['GET', 'POST'])
+def generate_friends_tree_visualization():
+    """
+    API endpoint to generate a visual representation of a user's friends tree.
+    Takes a user email and returns a base64 encoded image of the friends tree.
+    """
+    try:
+        # Get email from either query parameters (GET) or JSON body (POST)
+        if request.method == 'GET':
+            user_email = request.args.get('email')
+        else:  # POST
+            data = request.json
+            user_email = data.get('email')
+
+        # Validate user email
+        if not user_email:
+            return jsonify({
+                "success": False,
+                "message": "Missing required parameter: email"
+            }), 400
+
+        # Log request
+        print(f"Received request to generate friends tree visualization for user: {user_email}")
+
+        # Get user profile document
+        user_profile_ref = db.collection('user_profiles').document(user_email)
+        user_profile = user_profile_ref.get()
+
+        if not user_profile.exists:
+            print(f"Error: User profile not found for email: {user_email}")
+            return jsonify({
+                "success": False,
+                "message": f"User profile not found for email: {user_email}"
+            }), 404
+
+        # Get user's basic info
+        user_data = user_profile.to_dict()
+        user_name = f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}"
+        
+        # Get user's profile image
+        user_profile_image = None
+        current_profile_image_id = user_data.get('currentProfileImageId')
+        if current_profile_image_id:
+            # Get the profile image from the profileImages collection
+            profile_image_ref = user_profile_ref.collection('profileImages').document(current_profile_image_id)
+            profile_image_doc = profile_image_ref.get()
+            
+            if profile_image_doc.exists:
+                profile_image_data = profile_image_doc.to_dict()
+                print(profile_image_data)
+                user_profile_image = profile_image_data.get('imageData')  # Assuming base64 data is stored in 'data' field
+
+        # Get user's friends data
+        friends_data_ref = user_profile_ref.collection('friendsData').document('friendstree')
+        friends_data = friends_data_ref.get()
+
+        # If friends data exists, use it, otherwise return empty list
+        if friends_data.exists:
+            friends_list = friends_data.to_dict().get('friends', [])
+        else:
+            friends_list = []
+
+        # Generate friends tree visualization
+        image_base64 = generate_friends_tree(user_email, user_name, user_profile_image, friends_list)
+
+        # Return the image data
+        return jsonify({
+            "success": True,
+            "userEmail": user_email,
+            "image": image_base64
+        })
+
+    except Exception as e:
+        logger.error(f"Error generating friends tree visualization: {e}")
+        import traceback
+        error_details = traceback.format_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "details": error_details
+        }), 500
+
+def generate_friends_tree(user_email, user_name, user_profile_image, friends_list):
+    """
+    Generate a tree visualization for a user's friends
+    
+    Args:
+        user_email (str): Email of the user
+        user_name (str): Name of the user
+        user_profile_image (str or bytes): Base64 encoded profile image data or bytes
+        friends_list (list): List of friend nodes
+        
+    Returns:
+        str: Base64 encoded image of the friends tree
+    """
+    import tempfile
+    import os
+    import base64
+    import shutil
+    from graphviz import Digraph
+    from PIL import Image, ImageDraw, ImageOps
+    import io
+
+    # Debug flag
+    DEBUG = True
+    
+    # Make sure Graphviz is available
+    try:
+        from graphviz.backend import run_check
+        run_check()
+        print("Graphviz is available and working.")
+    except Exception as e:
+        print(f"WARNING: Graphviz check failed: {e}")
+        
+    # Create temp directory
+    temp_dir = tempfile.mkdtemp(prefix='friends_tree_')
+    print(f"Using temporary directory: {temp_dir}")
+    
+    # Create a Digraph object with simplified background
+    dot = Digraph(
+        comment='Friends Tree',
+        format='png',
+        engine='dot',
+        graph_attr={
+            'rankdir': 'TB',  # Top to bottom direction
+            'splines': 'polyline',  # Use polyline for natural connections
+            'bgcolor': 'lightblue',  # Simplified background color
+            'nodesep': '0.75',  # Node separation
+            'ranksep': '1.5',  # Rank separation
+            'fontname': 'Arial',
+            'style': 'rounded,filled',  # Add rounded style to the graph
+            'color': '#000000',  # Black border color
+            'penwidth': '3.0',  # Thicker border
+        },
+        node_attr={
+            'shape': 'box',
+            'style': 'filled,rounded',
+            'fillcolor': 'white',
+            'fontcolor': 'black',  # Black text for all nodes
+            'penwidth': '2.0',
+            'fontsize': '14',
+            'fontname': 'Arial',
+            'height': '0.6',
+            'width': '1.6',
+            'margin': '0.2'
+        },
+        edge_attr={
+            'color': '#000000',  # Black color for all edges
+            'penwidth': '2.0'  # Thicker edges
+        }
+    )
+
+    # Create profile image node function with improved handling for different data formats
+    def create_profile_image_node(profile_image_data, node_id):
+        """Create a temporary profile image file from base64 data, bytes, or use default icon."""
+        image_path = os.path.join(temp_dir, f'friend_profile_{node_id}.png')
+        
+        try:
+            if profile_image_data:
+                image_bytes = None
+                
+                # Handle different data formats
+                if isinstance(profile_image_data, str):
+                    # Check if it has a base64 header
+                    if ',' in profile_image_data:
+                        # Strip the header if present
+                        _, profile_image_data = profile_image_data.split(',', 1)
+                    try:
+                        # Decode base64 string to bytes
+                        image_bytes = base64.b64decode(profile_image_data)
+                    except Exception as decode_error:
+                        print(f"Error decoding base64 data: {decode_error}")
+                        return None
+                        
+                elif isinstance(profile_image_data, bytes):
+                    # Already bytes, use directly
+                    image_bytes = profile_image_data
+                
+                # If we have valid image bytes, process them
+                if image_bytes:
+                    # Create a PIL Image from bytes
+                    img = Image.open(io.BytesIO(image_bytes))
+                    
+                    # Convert to RGB if needed
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    
+                    # Resize to a standard size
+                    img = img.resize((100, 100))
+                    
+                    # Make circular by creating a mask
+                    mask = Image.new('L', (100, 100), 0)
+                    draw = ImageDraw.Draw(mask)
+                    draw.ellipse((0, 0, 100, 100), fill=255)
+                    
+                    # Apply the circular mask
+                    img = ImageOps.fit(img, mask.size, centering=(0.5, 0.5))
+                    img.putalpha(mask)
+                    
+                    # Save the image
+                    img.save(image_path, 'PNG')
+                    
+                    if DEBUG:
+                        print(f"Created profile image at: {image_path}")
+                        print(f"Image exists: {os.path.exists(image_path)}")
+                        print(f"Image size: {os.path.getsize(image_path)} bytes")
+                    
+                    return image_path
+                else:
+                    raise ValueError("Could not convert profile image data to bytes")
+            
+            # If we reach here, either no data was provided or processing failed
+            # Create a simple profile icon using PIL
+            img = Image.new('RGB', (100, 100), (204, 204, 204))
+            draw = ImageDraw.Draw(img)
+            # Draw a circle for the head
+            draw.ellipse([25, 25, 75, 75], fill=(255, 255, 255))
+            # Draw a path for the body
+            draw.polygon([(50, 70), (30, 100), (70, 100)], fill=(255, 255, 255))
+            img.save(image_path, 'PNG')
+            
+            if DEBUG:
+                print(f"Created default profile image at: {image_path}")
+                
+            return image_path
+            
+        except Exception as e:
+            print(f"Error creating profile image: {e}")
+            import traceback
+            print(traceback.format_exc())
+            # Return None on error and let calling code handle the missing image
+            return None
+
+    # Create center node for the user
+    user_node_id = "user"
+    
+    # Create user profile image node with improved handling
+    print(f"User profile image type: {type(user_profile_image)}")
+    if isinstance(user_profile_image, bytes):
+        print(f"User profile image is in bytes format, length: {len(user_profile_image)}")
+    elif isinstance(user_profile_image, str):
+        print(f"User profile image is in string format, length: {len(user_profile_image)}")
+    else:
+        print(f"User profile image is in format: {type(user_profile_image)}")
+    
+    user_image_path = create_profile_image_node(user_profile_image, user_node_id)
+    
+    # Create a stylized label for the user node
+    user_label = "<<TABLE BORDER='0' CELLBORDER='1' CELLSPACING='0' CELLPADDING='4'>"
+    if user_image_path and os.path.exists(user_image_path):
+        # Properly format the path for Graphviz
+        image_path = os.path.abspath(user_image_path).replace('\\', '/')
+        if DEBUG:
+            print(f"User image path for DOT: {image_path}")
+        user_label += f"<TR><TD ROWSPAN='2'><IMG SRC='{image_path}' SCALE='TRUE' WIDTH='50' HEIGHT='50'/></TD>"
+    else:
+        user_label += "<TR><TD ROWSPAN='2'>👤</TD>"
+    
+    # Add name information
+    user_label += f"<TD ALIGN='LEFT'><B>{user_name}</B></TD></TR>"
+    
+    # Add self label
+    user_label += f"<TR><TD ALIGN='LEFT'>Myself</TD></TR>"
+    user_label += "</TABLE>>"
+    
+    # Add user node with special styling
+    dot.node(
+        user_node_id,
+        label=user_label,
+        fillcolor='#4CAF50',  # Green background for user node
+        fontcolor='white',
+        style='filled,rounded',
+        penwidth='3.0'
+    )
+
+    # Group friends by category
+    friend_categories = {}
+    for friend in friends_list:
+        category = friend.get('category', 'Other')
+        if category not in friend_categories:
+            friend_categories[category] = []
+        friend_categories[category].append(friend)
+
+    # Add invisible connection point node (center point)
+    center_point_id = "center_point"
+    dot.node(center_point_id, label="", shape="point", width="0.1", height="0.1", style="invis")
+    
+    # Connect user to center point
+    dot.edge(user_node_id, center_point_id, style="dotted", arrowhead="none")
+
+    # For each category, create a cluster and add friend nodes
+    for category_index, (category, friends) in enumerate(friend_categories.items()):
+        # Create a subgraph for this category to group friends
+        with dot.subgraph(name=f'cluster_category_{category_index}') as c:
+            c.attr(label=category, style="rounded,filled", fillcolor="#F0F0F0", fontname="Arial", fontsize="16")
+            c.attr(rank='same')  # Keep all friends in this category at the same rank
+            
+            for i, friend in enumerate(friends):
+                friend_id = f"friend_{category_index}_{i}"
+                
+                # Create friend profile image node from base64 data with improved handling
+                friend_image_path = create_profile_image_node(friend.get('profileImage'), friend_id)
+                
+                # Create a stylized label for the friend node
+                friend_label = "<<TABLE BORDER='0' CELLBORDER='1' CELLSPACING='0' CELLPADDING='4'>"
+                if friend_image_path and os.path.exists(friend_image_path):
+                    # Properly format the path for Graphviz
+                    image_path = os.path.abspath(friend_image_path).replace('\\', '/')
+                    friend_label += f"<TR><TD ROWSPAN='2'><IMG SRC='{image_path}' SCALE='TRUE' WIDTH='50' HEIGHT='50'/></TD>"
+                else:
+                    friend_label += "<TR><TD ROWSPAN='2'>👤</TD>"
+                
+                # Add name information
+                friend_label += f"<TD ALIGN='LEFT'><B>{friend.get('name', 'Unknown')}</B></TD></TR>"
+                
+                # Add email information
+                friend_label += f"<TR><TD ALIGN='LEFT'>{friend.get('email', '')}</TD></TR>"
+                friend_label += "</TABLE>>"
+                
+                # Add friend node with proper styling based on category
+                # Use different colors for different categories
+                category_colors = {
+                    'Family': '#E6B0AA',  # Light red
+                    'Close Friends': '#AED6F1',  # Light blue
+                    'Colleagues': '#A9DFBF',  # Light green
+                    'Neighbors': '#F9E79F',  # Light yellow
+                    'School': '#D7BDE2'  # Light purple
+                }
+                fillcolor = category_colors.get(category, '#F5F5F5')  # Default to light gray
+                
+                c.node(
+                    friend_id,
+                    label=friend_label,
+                    fillcolor=fillcolor,
+                    fontcolor='black',
+                    style='filled,rounded',
+                    penwidth='2.0'
+                )
+                
+                # Connect friend to the center point
+                dot.edge(center_point_id, friend_id, style="solid", arrowhead="none")
+
+    # Add a title with a decorative border
+    dot.attr(label=r'\nFriends Tree\n', fontsize="24", fontname="Arial", 
+             labelloc="t", labeljust="c", 
+             style="filled", fillcolor="#E0F7FA", color="#000000", penwidth="3.0")
+
+    # Output files
+    output_path = os.path.join(temp_dir, 'friends_tree')
+    
+    try:
+        # Save DOT file for debugging
+        with open(f"{output_path}.dot", 'w', encoding='utf-8') as f:
+            f.write(dot.source)
+        
+        if DEBUG:
+            print(f"DOT file saved to {output_path}.dot")
+            
+        # Render the graph
+        dot.render(output_path, cleanup=False)
+        
+        if DEBUG:
+            print(f"Graph rendered to {output_path}.png")
+            print(f"File exists: {os.path.exists(f'{output_path}.png')}")
+            print(f"File size: {os.path.getsize(f'{output_path}.png') if os.path.exists(f'{output_path}.png') else 'N/A'} bytes")
+        
+        # Read the image and encode it to base64
+        with open(f"{output_path}.png", 'rb') as f:
+            img_data = f.read()
+        
+        img_base64 = base64.b64encode(img_data).decode('utf-8')
+        
+        if DEBUG:
+            print(f"Image encoded to base64, length: {len(img_base64)}")
+        
+        return img_base64
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error rendering graph: {e}")
+        print(error_details)
+        return f"Error: {str(e)}\nDetails: {error_details}\nDOT file saved to {output_path}.dot for debugging"
+    finally:
+        try:
+            # Clean up temporary directory
+            if not DEBUG:  # Keep files if debugging
+                shutil.rmtree(temp_dir)
+                print(f"Cleaned up temporary directory: {temp_dir}")
+        except Exception as cleanup_error:
+            print(f"Error cleaning up: {cleanup_error}")  
+
+
 if __name__ == '__main__':
     print("Starting Flask server...")
     app.run(host='0.0.0.0', port=5000, debug=True)
