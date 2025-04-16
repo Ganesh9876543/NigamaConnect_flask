@@ -27,7 +27,7 @@ def generate_relatives_tree(relatives_data):
         relatives_list = relatives_data
     
     # Find the self person
-    self_person = next((m for m in relatives_list if m.get('isSelf') == "true"), None)
+    self_person = next((m for m in relatives_list if m.get('isSelf') == true), None)
     if not self_person:
         return "Error: No self person found in the relatives data"
     
