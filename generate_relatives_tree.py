@@ -27,7 +27,7 @@ def generate_relatives_tree(relatives_data):
         relatives_list = relatives_data
     
     # Find the self person
-    self_person = next((m for m in relatives_list if m.get('isSelf') == "true"), None)
+    self_person = next((m for m in relatives_list if m.get('isSelf') == True), None)
     if not self_person:
         return "Error: No self person found in the relatives data"
     
@@ -106,7 +106,7 @@ def generate_relatives_tree(relatives_data):
         fontcolor = 'black'
         
         # Special color for "self" node only - black background
-        if member.get('isSelf') == "true":
+        if member.get('isSelf') == True:
             fillcolor = 'black'
             fontcolor = 'white'  # White text for readability on black background
         
