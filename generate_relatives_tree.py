@@ -13,7 +13,6 @@ def generate_relatives_tree(relatives_data):
     import base64
     from graphviz import Digraph
     from PIL import Image, ImageDraw
-    import io
 
     # Convert dictionary to list of relatives
     if isinstance(relatives_data, dict):
@@ -68,44 +67,32 @@ def generate_relatives_tree(relatives_data):
         }
     )
 
-    # Create profile image node function - updated to handle base64 images
+    # Create profile image node function
     def create_profile_image_node(profile_image, member_id):
-        """Create a temporary profile image file from base64 data, URL, or use default icon."""
+        """Create a temporary profile image file from URL or use default icon."""
         temp_dir = tempfile.gettempdir()
         image_path = os.path.abspath(os.path.join(temp_dir, f'profile_{member_id}.png'))
         
         try:
-            # Handle base64 encoded image
-            if profile_image and isinstance(profile_image, str):
-                if profile_image.startswith('data:image/'):
-                    # Extract the base64 part
-                    base64_data = profile_image.split(',')[1] if ',' in profile_image else profile_image
-                    try:
-                        # Decode the base64 data
-                        image_data = base64.b64decode(base64_data)
-                        img = Image.open(io.BytesIO(image_data))
-                        
-                        # Resize the image to desired dimensions
-                        img = img.resize((100, 100), Image.LANCZOS)
-                        img.save(image_path, 'PNG')
-                        return image_path
-                    except Exception as e:
-                        print(f"Error processing base64 image: {e}")
-                        # Fall back to default image
-                elif profile_image.startswith('http'):
-                    # For URLs, we'll create a default image since we can't download
-                    # from the provided example URLs in this context
-                    pass
-            
-            # Create a default profile icon using PIL
-            img = Image.new('RGBA', (100, 100), (255, 255, 255, 0))
-            draw = ImageDraw.Draw(img)
-            # Draw a circle for the head
-            draw.ellipse([25, 25, 75, 75], fill=(204, 204, 204, 255))
-            # Draw a path for the body
-            draw.polygon([(50, 70), (30, 100), (70, 100)], fill=(204, 204, 204, 255))
-            img.save(image_path, 'PNG')
-            
+            if profile_image and isinstance(profile_image, str) and profile_image.startswith('http'):
+                # For this example, we'll create a default image since we can't download
+                # from the provided example URLs
+                img = Image.new('RGBA', (100, 100), (255, 255, 255, 0))
+                draw = ImageDraw.Draw(img)
+                # Draw a circle for the head
+                draw.ellipse([25, 25, 75, 75], fill=(204, 204, 204, 255))
+                # Draw a path for the body
+                draw.polygon([(50, 70), (30, 100), (70, 100)], fill=(204, 204, 204, 255))
+                img.save(image_path, 'PNG')
+            else:
+                # Create a simple profile icon using PIL
+                img = Image.new('RGBA', (100, 100), (255, 255, 255, 0))
+                draw = ImageDraw.Draw(img)
+                # Draw a circle for the head
+                draw.ellipse([25, 25, 75, 75], fill=(204, 204, 204, 255))
+                # Draw a path for the body
+                draw.polygon([(50, 70), (30, 100), (70, 100)], fill=(204, 204, 204, 255))
+                img.save(image_path, 'PNG')
         except Exception as e:
             print(f"Error creating profile image: {e}")
             return None
@@ -122,8 +109,8 @@ def generate_relatives_tree(relatives_data):
         if member.get('isSelf') == "true":
             fillcolor = 'black'
             fontcolor = 'white'  # White text for readability on black background
-
-        # Create profile image node from base64 data or fallback
+        
+        # Create profile image node
         profile_image_path = create_profile_image_node(member.get('profileImage'), member['id'])
         
         # Create a stylized label with name, relation, and generation
