@@ -1225,9 +1225,15 @@ def add_spouse_details():
                       .document(current_image_id)\
                       .get()
                       
-        wife_image_data = wife_profile_data.to_dict().get('imageData')
-        if wife_image_data:
-            wife_image_data = f"data:image/jpeg;base64,{wife_image_data}"
+        wife_image_data2 = wife_profile_data.to_dict()
+        if wife_image_data2!=None:
+            print(wife_image_data2)
+            wife_profile_data=wife_image_data2.get('imageData')
+            if wife_image_data:
+                wife_image_data = f"data:image/jpeg;base64,{wife_image_data}"
+            print("le")   
+        else:
+            wife_image_data=None
         
 
         husband_profile_doc = user_profiles_ref.document(husband_email).get() if husband_email else None
@@ -1245,9 +1251,13 @@ def add_spouse_details():
                       .document(hus_current_image_id)\
                       .get()
                       
-        husband_image_data = hus_profile_data.to_dict().get('imageData')
-        if husband_image_data:
-            husband_image_data = f"data:image/jpeg;base64,{husband_image_data}"
+        husband_image_data2 = hus_profile_data.to_dict()
+        if husband_image_data2:
+            husband_image_data=husband_image_data2.get('imageData')
+            if husband_image_data:
+                husband_image_data = f"data:image/jpeg;base64,{husband_image_data}"
+        else:
+            husband_image_data=None
 
         # Helper function to create complete mini-tree with spouse
         def create_complete_mini_tree(member_list, member_id, spouse_details=None):
