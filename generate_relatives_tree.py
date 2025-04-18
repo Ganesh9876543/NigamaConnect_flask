@@ -11,6 +11,7 @@ def generate_relatives_tree(relatives_data):
     import tempfile
     import os
     import base64
+    import io
     from graphviz import Digraph
     from PIL import Image, ImageDraw
 
@@ -69,30 +70,46 @@ def generate_relatives_tree(relatives_data):
 
     # Create profile image node function
     def create_profile_image_node(profile_image, member_id):
-        """Create a temporary profile image file from URL or use default icon."""
+        """Create a temporary profile image file from URL, base64 data, or use default icon."""
         temp_dir = tempfile.gettempdir()
         image_path = os.path.abspath(os.path.join(temp_dir, f'profile_{member_id}.png'))
         
         try:
-            if profile_image and isinstance(profile_image, str) and profile_image.startswith('http'):
-                # For this example, we'll create a default image since we can't download
-                # from the provided example URLs
-                img = Image.new('RGBA', (100, 100), (255, 255, 255, 0))
-                draw = ImageDraw.Draw(img)
-                # Draw a circle for the head
-                draw.ellipse([25, 25, 75, 75], fill=(204, 204, 204, 255))
-                # Draw a path for the body
-                draw.polygon([(50, 70), (30, 100), (70, 100)], fill=(204, 204, 204, 255))
-                img.save(image_path, 'PNG')
-            else:
-                # Create a simple profile icon using PIL
-                img = Image.new('RGBA', (100, 100), (255, 255, 255, 0))
-                draw = ImageDraw.Draw(img)
-                # Draw a circle for the head
-                draw.ellipse([25, 25, 75, 75], fill=(204, 204, 204, 255))
-                # Draw a path for the body
-                draw.polygon([(50, 70), (30, 100), (70, 100)], fill=(204, 204, 204, 255))
-                img.save(image_path, 'PNG')
+            if profile_image and isinstance(profile_image, str):
+                if profile_image.startswith('data:image/'):
+                    # Handle base64 encoded image
+                    try:
+                        # Split the base64 data from the metadata
+                        header, encoded = profile_image.split(',', 1)
+                        # Decode the base64 data
+                        img_data = base64.b64decode(encoded)
+                        # Open image from decoded data
+                        img = Image.open(io.BytesIO(img_data))
+                        # Resize to standardize dimensions
+                        img = img.resize((100, 100))
+                        # Save as image file
+                        img.save(image_path, 'PNG')
+                        return image_path
+                    except Exception as e:
+                        print(f"Error processing base64 image: {e}")
+                        # Fall back to default image
+                elif profile_image.startswith('http'):
+                    # For URLs, we'll create a default image for this example
+                    # In a real implementation, you'd download the image
+                    img = Image.new('RGBA', (100, 100), (255, 255, 255, 0))
+                    draw = ImageDraw.Draw(img)
+                    draw.ellipse([25, 25, 75, 75], fill=(204, 204, 204, 255))
+                    draw.polygon([(50, 70), (30, 100), (70, 100)], fill=(204, 204, 204, 255))
+                    img.save(image_path, 'PNG')
+                    return image_path
+            
+            # Default placeholder image
+            img = Image.new('RGBA', (100, 100), (255, 255, 255, 0))
+            draw = ImageDraw.Draw(img)
+            draw.ellipse([25, 25, 75, 75], fill=(204, 204, 204, 255))
+            draw.polygon([(50, 70), (30, 100), (70, 100)], fill=(204, 204, 204, 255))
+            img.save(image_path, 'PNG')
+            
         except Exception as e:
             print(f"Error creating profile image: {e}")
             return None
@@ -118,12 +135,13 @@ def generate_relatives_tree(relatives_data):
         if profile_image_path:
             # Convert Windows path to forward slashes for Graphviz
             image_path = profile_image_path.replace('\\', '/').replace('//', '/')
-            label += f"<TR><TD ROWSPAN='2'><IMG SRC='{image_path}' SCALE='TRUE' FIXEDSIZE='TRUE' WIDTH='50' HEIGHT='50'/></TD>"
+            # Remove problematic attributes and use only SCALE
+            label += f"<TR><TD ROWSPAN='2'><IMG SRC='{image_path}' SCALE='TRUE'/></TD>"
         else:
             label += "<TR><TD ROWSPAN='2'>👤</TD>"
         
         # Add name information
-        full_name = f"{member.get('firstName', '')} {member.get('lastName', '')}"
+        full_name = member.get('name', '')
         label += f"<TD ALIGN='LEFT'><B>{full_name}</B></TD></TR>"
         
         # Add relation information
