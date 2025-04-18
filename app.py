@@ -1187,6 +1187,7 @@ def update_family_tree_members():
 
         
 
+
 import json
 @app.route('/api/family-tree/add-spouse', methods=['POST'])
 def add_spouse_details():
@@ -1202,12 +1203,21 @@ def add_spouse_details():
         print("Received data:", data)
 
         # Extract fields from request
-        wife_family_tree_id = data.get("wifeFamilyTreeId")
-        wife_email = data.get("wifeEmail")
-        wife_node_id = data.get('wifeNodeId')
-        husband_family_tree_id = data.get('husbandFamilyTreeId')
-        husband_email = data.get('husbandEmail')
-        husband_node_id = data.get('husbandMemberId')
+        # wife_family_tree_id = data.get("wifeFamilyTreeId")
+        # wife_email = data.get("wifeEmail")
+        # wife_node_id = data.get('wifeNodeId')
+        # husband_family_tree_id = data.get('husbandFamilyTreeId')
+        # husband_email = data.get('husbandEmail')
+        # husband_node_id = data.get('husbandMemberId')
+        
+        wife_family_tree_id = data["wifeFamilyTreeId"]
+        wife_email = data["wifeEmail"]
+        wife_node_id = data['wifeNodeId']
+        husband_family_tree_id = data['husbandFamilyTreeId']
+        husband_email = data['husbandEmail']
+        husband_node_id = data['husbandMemberId']
+        
+        print(wife_email)
         
         # Fetch user profiles
         wife_profile_doc = user_profiles_ref.document(wife_email).get() if wife_email else None
@@ -1216,6 +1226,9 @@ def add_spouse_details():
                 "success": False,
                 "message": f"Wife profile not found for email {wife_email}"
             }), 404
+            
+        print("k")
+        
         wife_profile = wife_profile_doc.to_dict()
         wife_first_name = wife_profile.get('firstName', 'Unknown')
         wife_last_name = wife_profile.get('lastName', 'Unknown')
@@ -1228,6 +1241,7 @@ def add_spouse_details():
         wife_image_data = wife_profile_data.to_dict().get('imageData')
         if wife_image_data:
             wife_image_data = f"data:image/jpeg;base64,{wife_image_data}"
+        
         
 
         husband_profile_doc = user_profiles_ref.document(husband_email).get() if husband_email else None
@@ -1295,6 +1309,7 @@ def add_spouse_details():
 
         # --- Scenario 1: Neither has family tree ---
         if not wife_family_tree_id and not husband_family_tree_id:
+            print("scenario 1")
             new_family_tree_id = str(uuid.uuid4())
             husband_node_id = "1"
             wife_node_id = "2"
@@ -1339,13 +1354,13 @@ def add_spouse_details():
                 "familyTreeId": new_family_tree_id,
                 "oldFamilyTreeId": None,
                 "lastName": husband_last_name,
-                "maritalStatus": "Married",
+                "MARITAL_STATUS": "Married",
                 "updatedAt": datetime.now().isoformat()
             }, merge=True)
             user_profiles_ref.document(husband_email).set({
                 "familyTreeId": new_family_tree_id,
                 "oldFamilyTreeId": None,
-                "maritalStatus": "Married",
+                "MARITAL_STATUS": "Married",
                 "updatedAt": datetime.now().isoformat()
             }, merge=True)
 
@@ -1357,6 +1372,7 @@ def add_spouse_details():
 
         # --- Scenario 2: Only wife has family tree ---
         elif not husband_family_tree_id and wife_family_tree_id:
+            print("scenario 2")
             wife_family_tree_doc = family_tree_ref.document(wife_family_tree_id).get()
             if not wife_family_tree_doc.exists:
                 return jsonify({
@@ -1479,13 +1495,13 @@ def add_spouse_details():
                 "familyTreeId": new_family_tree_id,
                 "oldFamilyTreeId": wife_family_tree_id,
                 "lastName": husband_last_name,
-                "maritalStatus": "Married",
+                "MARITAL_STATUS": "Married",
                 "updatedAt": datetime.now().isoformat()
             }, merge=True)
             user_profiles_ref.document(husband_email).set({
                 "familyTreeId": new_family_tree_id,
                 "oldFamilyTreeId": None,
-                "maritalStatus": "Married",
+                "MARITAL_STATUS": "Married",
                 "updatedAt": datetime.now().isoformat()
             }, merge=True)
 
@@ -1497,6 +1513,7 @@ def add_spouse_details():
 
         # --- Scenario 3: Only husband has family tree ---
         elif husband_family_tree_id and not wife_family_tree_id:
+            print("scenario 3")
             husband_family_tree_doc = family_tree_ref.document(husband_family_tree_id).get()
             if not husband_family_tree_doc.exists:
                 return jsonify({
@@ -1595,11 +1612,11 @@ def add_spouse_details():
                 "familyTreeId": husband_family_tree_id,
                 "oldFamilyTreeId": None,
                 "lastName": husband_last_name,
-                "maritalStatus": "Married",
+                "MARITAL_STATUS": "Married",
                 "updatedAt": datetime.now().isoformat()
             }, merge=True)
             user_profiles_ref.document(husband_email).set({
-                "maritalStatus": "Married",
+                "MARITAL_STATUS": "Married",
                 "updatedAt": datetime.now().isoformat()
             }, merge=True)
 
@@ -1773,12 +1790,12 @@ def add_spouse_details():
                 "familyTreeId": husband_family_tree_id,
                 "oldFamilyTreeId": wife_family_tree_id,
                 "lastName": husband_last_name,
-                "maritalStatus": "Married",
+                "MARITAL_STATUS": "Married",
                 "updatedAt": datetime.now().isoformat()
             })
             
             user_profiles_ref.document(husband_email).update({
-                "maritalStatus": "Married",
+                "MARITAL_STATUS": "Married",
                 "updatedAt": datetime.now().isoformat()
             })
             
@@ -2445,12 +2462,26 @@ def generate_friends_tree(user_email, user_name, user_profile_image, friends_lis
     # Connect user to center point
     dot.edge(user_node_id, center_point_id, style="dotted", arrowhead="none")
 
+    # Category colors
+    category_colors = {
+        'Family': '#E6B0AA',  # Light red
+        'Close Friends': '#AED6F1',  # Light blue
+        'Colleagues': '#A9DFBF',  # Light green
+        'Neighbors': '#F9E79F',  # Light yellow
+        'School': '#D7BDE2'  # Light purple
+    }
+
     # For each category, create a cluster and add friend nodes
     for category_index, (category, friends) in enumerate(friend_categories.items()):
         # Create a subgraph for this category to group friends
         with dot.subgraph(name=f'cluster_category_{category_index}') as c:
             c.attr(label=category, style="rounded,filled", fillcolor="#F0F0F0", fontname="Arial", fontsize="16")
-            c.attr(rank='same')  # Keep all friends in this category at the same rank
+            
+            # Create an ordered chain within this category
+            # Remove the 'rank="same"' attribute to allow vertical arrangement
+            
+            # Create previous node tracker for vertical connections
+            prev_friend_id = None
             
             for i, friend in enumerate(friends):
                 friend_id = f"friend_{category_index}_{i}"
@@ -2474,17 +2505,10 @@ def generate_friends_tree(user_email, user_name, user_profile_image, friends_lis
                 friend_label += f"<TR><TD ALIGN='LEFT'>{friend.get('email', '')}</TD></TR>"
                 friend_label += "</TABLE>>"
                 
-                # Add friend node with proper styling based on category
-                # Use different colors for different categories
-                category_colors = {
-                    'Family': '#E6B0AA',  # Light red
-                    'Close Friends': '#AED6F1',  # Light blue
-                    'Colleagues': '#A9DFBF',  # Light green
-                    'Neighbors': '#F9E79F',  # Light yellow
-                    'School': '#D7BDE2'  # Light purple
-                }
+                # Get fillcolor based on category
                 fillcolor = category_colors.get(category, '#F5F5F5')  # Default to light gray
                 
+                # Add friend node with proper styling
                 c.node(
                     friend_id,
                     label=friend_label,
@@ -2494,8 +2518,17 @@ def generate_friends_tree(user_email, user_name, user_profile_image, friends_lis
                     penwidth='2.0'
                 )
                 
-                # Connect friend to the center point
-                dot.edge(center_point_id, friend_id, style="solid", arrowhead="none")
+                # If this is the first friend in the category, connect it to the center point
+                if i == 0:
+                    dot.edge(center_point_id, friend_id, style="solid", arrowhead="none")
+                
+                # If there was a previous friend in this category, connect this friend below it
+                if prev_friend_id:
+                    # Add invisible edge to enforce vertical ordering
+                    c.edge(prev_friend_id, friend_id, style="invis")
+                
+                # Update previous friend ID for next iteration
+                prev_friend_id = friend_id
 
     # Add a title with a decorative border
     dot.attr(label=r'\nFriends Tree\n', fontsize="24", fontname="Arial", 
@@ -2544,7 +2577,8 @@ def generate_friends_tree(user_email, user_name, user_profile_image, friends_lis
                 shutil.rmtree(temp_dir)
                 print(f"Cleaned up temporary directory: {temp_dir}")
         except Exception as cleanup_error:
-            print(f"Error cleaning up: {cleanup_error}")     
+            print(f"Error cleaning up: {cleanup_error}")
+ 
 
 
 if __name__ == '__main__':
