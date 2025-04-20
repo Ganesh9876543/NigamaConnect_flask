@@ -38,21 +38,21 @@ def build_family_relationships(family_data: List[Dict[str, Any]]) -> List[Dict[s
         if spouse_node:
             # Temporarily make spouse the "self" node
             temp_family_data = []
-            for person in family_data:
-                if person['id'] == self_node['id']:
-                    temp_person = deepcopy(person)
+            for p in family_data:
+                if p['id'] == self_node['id']:
+                    temp_person = deepcopy(p)
                     temp_person['isSelf'] = False
                     temp_family_data.append(temp_person)
-                elif person['id'] == spouse_node['id']:
-                    temp_person = deepcopy(person)
+                elif p['id'] == spouse_node['id']:
+                    temp_person = deepcopy(p)
                     temp_person['isSelf'] = True
                     temp_family_data.append(temp_person)
                 else:
-                    temp_family_data.append(deepcopy(person))
+                    temp_family_data.append(deepcopy(p))
 
-            # Build spouse's family tree
+            # Build spouse's family tree with spouse as "self"
             spouse_tree = build_family_relations_with_spouse(temp_family_data)
-
+            
             # Convert relationships and restore original self status
             result = []
             for person in spouse_tree:
@@ -68,6 +68,8 @@ def build_family_relationships(family_data: List[Dict[str, Any]]) -> List[Dict[s
                         'isSelf': False,
                         'relation': genderize('husband', 'wife', person)
                     })
+                # Only convert parents and their generation to in-laws
+                # This preserves spouse's children as direct relations without in-law suffix
                 elif (person.get('generation') is not None and 
                       spouse_node.get('generation') is not None and
                       (person['generation'] == spouse_node['generation'] or 
@@ -109,16 +111,24 @@ def build_family_relations_with_spouse(family_data: List[Dict[str, Any]]) -> Lis
 
 def convert_to_in_law_relation(relation: str, person: Dict[str, Any]) -> str:
     """Convert a relation to its in-law equivalent."""
+    # Skip conversion for MySelf, husband, wife
     if relation in ['MySelf', 'husband', 'wife']:
         return relation
 
     conversion_map = {
+        # Parents become parents-in-law
         'father': 'father-in-law',
         'mother': 'mother-in-law',
+        
+        # Siblings become siblings-in-law
         'brother': 'brother-in-law',
         'sister': 'sister-in-law',
+        
+        # Aunts and uncles become aunts/uncles-in-law
         'uncle': 'uncle-in-law',
         'aunt': 'aunt-in-law',
+        
+        # Children don't change - spouse's children are your children
         'son': 'son',
         'daughter': 'daughter',
     }
@@ -133,7 +143,7 @@ def compute_all_relations(
     """Compute all possible relationships for the family tree."""
     spouse = family_map.get(self_node.get('spouse'))
     father = family_map.get(self_node.get('parentId'))
-    mother = family_map.get(father.get('spouse')) if father else None
+    mother = father.get('spouse') and family_map.get(father.get('spouse')) if father else None
 
     # Get father's siblings with gender info
     father_siblings = get_father_siblings_with_gender(father, family_map, family_data) if father else []
@@ -161,9 +171,10 @@ def compute_all_relations(
     ]
 
     # Get children
+    possible_parent_ids = [p_id for p_id in [self_node['id'], spouse and spouse['id']] if p_id]
     children = [
         person['id'] for person in family_data
-        if person.get('parentId') in [self_node['id'], spouse['id'] if spouse else None]
+        if person.get('parentId') in possible_parent_ids
     ]
 
     # Get uncles and aunts
@@ -178,9 +189,10 @@ def compute_all_relations(
     for sib_id in siblings:
         sib = family_map.get(sib_id)
         if sib:
+            possible_sib_parent_ids = [p_id for p_id in [sib_id, sib.get('spouse')] if p_id]
             nieces_nephews.extend([
                 person['id'] for person in family_data
-                if person.get('parentId') in [sib_id, sib.get('spouse')]
+                if person.get('parentId') in possible_sib_parent_ids
             ])
 
     # Get cousins
@@ -188,14 +200,15 @@ def compute_all_relations(
     for ua_id in uncles_aunts:
         ua = family_map.get(ua_id)
         if ua:
+            possible_ua_parent_ids = [p_id for p_id in [ua_id, ua.get('spouse')] if p_id]
             cousins.extend([
                 person['id'] for person in family_data
-                if person.get('parentId') in [ua_id, ua.get('spouse')]
+                if person.get('parentId') in possible_ua_parent_ids
             ])
 
     return {
         'spouse': spouse['id'] if spouse else None,
-        'parents': [p for p in [father['id'] if father else None, mother['id'] if mother else None] if p],
+        'parents': [p for p in [father and father['id'], mother and mother['id']] if p],
         'children': children,
         'siblings': siblings,
         'uncles_aunts': uncles_aunts,
@@ -248,20 +261,38 @@ def get_relationship(
     family_map: Dict[str, Dict[str, Any]]
 ) -> str:
     """Determine the relationship between self and another person."""
+    # Check if the person is self
     if person['id'] == self_node['id']:
         return 'MySelf'
 
+    # Check spouse relationship
     if person['id'] == relations['spouse']:
         return genderize('husband', 'wife', person)
 
-    # Handle special case when self has no parents but has spouse
+    # Special handling when self has a spouse but no parents
     if relations['has_no_parents'] and self_node.get('spouse'):
+        # If this person is a parent of the spouse
         if person['id'] in relations['in_laws']['spouse_parents']:
             return genderize('father-in-law', 'mother-in-law', person)
+        
+        # If this person is a sibling of the spouse
         if person['id'] in relations['spouse_siblings']:
             return genderize('brother-in-law', 'sister-in-law', person)
+        
+        # If this person is an uncle/aunt of the spouse
         if person['id'] in relations['spouse_uncles_aunts']:
             return genderize('father-in-law', 'mother-in-law', person)
+        
+        # If this person is spouse of uncle/aunt of spouse
+        is_spouse_of_spouse_uncle_aunt = (
+            person.get('spouse') and person['spouse'] in relations['spouse_uncles_aunts']
+        )
+        if is_spouse_of_spouse_uncle_aunt:
+            related_uncle_aunt = family_map.get(person['spouse'])
+            if related_uncle_aunt and related_uncle_aunt.get('gender') == 'female':
+                return 'father-in-law'  # Husband of spouse's aunt is "father-in-law"
+            else:
+                return 'mother-in-law'  # Wife of spouse's uncle is "mother-in-law"
 
     # Regular relationships
     if person['id'] in relations['siblings']:
@@ -275,32 +306,42 @@ def get_relationship(
     if person['id'] in relations['in_laws']['spouse_sibling_spouses']:
         return genderize('brother-in-law', 'sister-in-law', person)
 
-    # Check father's siblings
-    father_sibling = next(
-        (fs for fs in relations['father_siblings'] if fs['id'] == person['id']),
-        None
-    )
+    # Check if person is one of father's siblings
+    father_sibling = next((fs for fs in relations['father_siblings'] if fs['id'] == person['id']), None)
     if father_sibling:
-        return 'mother' if father_sibling['gender'] == 'female' else 'father'
+        # If father's sibling is female, call her "mother"
+        if father_sibling.get('gender') == 'female':
+            return 'mother'
+        else:
+            return 'father'
 
-    # Check spouse of father's sibling
+    # Check if person is spouse of father's sibling
     is_spouse_of_father_sibling = any(
         fs['spouse'] == person['id'] for fs in relations['father_siblings']
     )
     if is_spouse_of_father_sibling:
+        # Get the related sibling
         related_sibling = next(
             fs for fs in relations['father_siblings'] if fs['spouse'] == person['id']
         )
-        return 'father' if related_sibling['gender'] == 'female' else 'mother'
+        if related_sibling.get('gender') == 'female':
+            return 'father'  # Husband of father's sister is "father"
+        else:
+            return 'mother'  # Wife of father's brother is "mother"
 
     if person['id'] in relations['parents']:
         return genderize('father', 'mother', person)
     if person['id'] in relations['uncles_aunts']:
         return genderize('uncle', 'aunt', person)
+
+    # Check if the person is the spouse of an uncle or aunt
     if person.get('spouse') and person['spouse'] in relations['uncles_aunts']:
         return genderize('uncle', 'aunt', person)
+
+    # Check if the person is a parent of the spouse (father/mother-in-law)
     if person['id'] in relations['in_laws']['spouse_parents']:
         return genderize('father-in-law', 'mother-in-law', person)
+
     if person['id'] in relations['children']:
         return genderize('son', 'daughter', person)
     if person['id'] in relations['nieces_nephews']:
@@ -311,10 +352,12 @@ def get_relationship(
     # Handle generational differences
     gen_diff = person.get('generation', 0) - self_node.get('generation', 0)
     if gen_diff > 1:
+        # Handle spouse's grandparents (when self has no parents)
         if relations['has_no_parents'] and self_node.get('spouse'):
             spouse = family_map.get(self_node['spouse'])
             spouse_gen_diff = person.get('generation', 0) - spouse.get('generation', 0)
             if spouse_gen_diff > 0:
+                # This is a grandparent from spouse's side, make it in-law
                 return gendered_relation(
                     spouse_gen_diff,
                     'grandfather-in-law',
