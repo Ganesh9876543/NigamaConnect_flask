@@ -92,7 +92,7 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                         else:
                             connections['family'].append({
                                 'email': member.get('email', ''),
-                                'fullname': member.get('name', ''),
+                                'fullName': member.get('name', ''),
                                 
                                 'gender': member.get('gender', ''),
                                 'maritalStatus': member.get('maritalStatus', ''),
@@ -125,8 +125,7 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                                         else:
                                             connections['relatives'].append({
                                                 'email': relative.get('email', ''),
-                                                'firstName': relative.get('firstName', ''),
-                                                'lastName': relative.get('lastName', ''),
+                                                'fullName': relative.get('name', ''),
                                                 'gender': relative.get('gender', ''),
                                                 'maritalStatus': relative.get('maritalStatus', ''),
                                                 'phone': relative.get('phone', ''),
