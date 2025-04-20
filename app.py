@@ -2579,7 +2579,42 @@ def generate_friends_tree(user_email, user_name, user_profile_image, friends_lis
         except Exception as cleanup_error:
             print(f"Error cleaning up: {cleanup_error}")
  
-
+from get_connections import get_user_connections
+@app.route('/api/get-connections', methods=['GET'])
+def get_connections():
+    
+    """
+    Get all connections (family, relatives, friends) for a user.
+    
+    Query Parameters:
+        email (str): User's email address
+        
+    Returns:
+        JSON response containing family, relatives, and friends
+    """
+    try:
+        print("get_connections--")
+        email = request.args.get('email')
+        print(email)        
+        if not email:
+            return jsonify({
+                'success': False,
+                'message': 'Email is required'
+            }), 400
+        
+        connections = get_user_connections(email)
+        
+        return jsonify({
+            'success': True,
+            'data': connections
+        })
+        
+    except Exception as e:
+        print("error")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
 
 if __name__ == '__main__':
     print("Starting Flask server...")
