@@ -2615,6 +2615,8 @@ def get_connections():
             'success': False,
             'message': str(e)
         }), 500
+
+from family_tree_relations import get_extended_family
 @app.route('/api/get-member-relatives-tree', methods=['POST'])
 def get_member_relatives_tree():
     """
