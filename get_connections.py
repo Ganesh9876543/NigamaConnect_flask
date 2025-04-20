@@ -1,0 +1,142 @@
+from typing import Dict, List, Any
+from firebase_admin import firestore
+from build_family_relationships import build_family_relationships
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Get all connections (family, relatives, friends) for a user.
+    
+    Args:
+        email (str): User's email address
+        
+    Returns:
+        Dict[str, List[Dict[str, Any]]]: Dictionary containing family, relatives, and friends
+    """
+    logger.info(f"Starting to fetch connections for user: {email}")
+    db = firestore.client()
+    
+    # Initialize connections dictionary
+    connections = {
+        'family': [],
+        'relatives': [],
+        'friends': []
+    }
+    
+    try:
+        # Get user profile
+        logger.info(f"Fetching user profile for email: {email}")
+        user_ref = db.collection('user_profiles').document(email)
+        user_doc = user_ref.get()
+        
+        if not user_doc.exists:
+            logger.warning(f"No user profile found for email: {email}")
+            return connections
+        
+        user_data = user_doc.to_dict()
+        logger.info(f"Successfully retrieved user profile for: {email}")
+        
+        # Get family tree data
+        if user_data.get('familyTreeId'):
+            family_tree_id = user_data['familyTreeId']
+            logger.info(f"Found family tree ID: {family_tree_id} for user: {email}")
+            
+            family_tree_ref = db.collection('family_tree').document(family_tree_id)
+            family_tree_doc = family_tree_ref.get()
+            
+            if family_tree_doc.exists:
+                family_tree_data = family_tree_doc.to_dict()
+                family_members = family_tree_data.get('familyMembers', [])
+                relatives_data = family_tree_data.get('relatives', {})
+                logger.info(f"Found {len(family_members)} family members")
+                logger.info(f"Relatives data structure: {type(relatives_data)}")
+                
+                # Process family members first
+                for member in family_members:
+                    if member.get('email'):  # Only include members with email
+                        try:
+                            # Get the member's relatives if they exist
+                            member_id = member.get('id')
+                            member_relatives = relatives_data.get(member_id, {})
+                            
+                            # Add the family member
+                            connections['family'].append({
+                                'email': member.get('email'),
+                                'fullName': member.get('name', ''),
+                                'profileImage': member.get('profileImage', ''),
+                                'relation': member.get('relation', 'family member')
+                            })
+                            
+                            # Process relatives for this family member
+                            if member_relatives:
+                                logger.info(f"Processing relatives for family member {member.get('name')}")
+                                for rel_id, relative in member_relatives.items():
+                                    if isinstance(relative, dict) and relative.get('email'):
+                                        try:
+                                            connections['relatives'].append({
+                                                'email': relative.get('email'),
+                                                'fullName': relative.get('name', ''),
+                                                'profileImage': relative.get('profileImage', ''),
+                                                'relation': f"relative of {member.get('name')}"
+                                            })
+                                            logger.info(f"Added relative {relative.get('name')} for family member {member.get('name')}")
+                                        except Exception as e:
+                                            logger.warning(f"Error processing relative {rel_id} for family member {member_id}: {str(e)}")
+                                            continue
+                            
+                        except Exception as e:
+                            logger.warning(f"Error processing family member {member.get('id')}: {str(e)}")
+                            continue
+                
+                logger.info(f"Added {len(connections['family'])} family members")
+                logger.info(f"Added {len(connections['relatives'])} relatives")
+                
+                # Get friends
+                logger.info("Fetching friends data")
+                friends_ref = user_ref.collection('friendsData').document('friendstree')
+                friends_doc = friends_ref.get()
+                
+                if friends_doc.exists:
+                    friends_data = friends_doc.to_dict()
+                    friends = friends_data.get('friends', [])
+                    logger.info(f"Found {len(friends)} friends")
+                    
+                    # Format friends
+                    logger.info("Formatting friends")
+                    for friend in friends:
+                        if friend.get('email'):  # Only include friends with email
+                            try:
+                                # Simplify friend category by removing "friend in" prefix
+                                category = friend.get('category', 'general')
+                                if category.startswith('friend in '):
+                                    category = category.replace('friend in ', '')
+                                
+                                connections['friends'].append({
+                                    'email': friend.get('email'),
+                                    'fullName': friend.get('name', ''),
+                                    'profileImage': friend.get('profileImage', ''),
+                                    'relation': category
+                                })
+                                logger.info(f"Successfully added friend: {friend.get('email')}")
+                            except Exception as e:
+                                logger.warning(f"Error processing friend data: {str(e)}")
+                                logger.warning(f"Problematic friend data: {friend}")
+                                continue
+                    logger.info(f"Added {len(connections['friends'])} friends to connections")
+                else:
+                    logger.info(f"No friends data found for user: {email}")
+            else:
+                logger.warning(f"Family tree document not found for ID: {family_tree_id}")
+        else:
+            logger.info(f"No family tree ID found for user: {email}")
+        
+        logger.info(f"Successfully retrieved all connections for user: {email}")
+        return connections
+        
+    except Exception as e:
+        logger.error(f"Error fetching connections for user {email}: {str(e)}")
+        raise 
