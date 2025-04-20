@@ -2615,6 +2615,86 @@ def get_connections():
             'success': False,
             'message': str(e)
         }), 500
+@app.route('/api/get-member-relatives-tree', methods=['POST'])
+def get_member_relatives_tree():
+    """
+    API endpoint to get a relatives tree for a specific member in a family tree,
+    with relationship labels showing how each person is related to the specified member.
+    
+    Request Body (JSON):
+        family_tree_id (str): ID of the family tree
+        node_id (str): ID of the node in the family tree
+        email (str): Email of the user making the request
+        
+    Returns:
+        JSON response containing the relatives tree with relationship labels
+    """
+    try:
+        # Get data from request body
+        print("hi")
+        data = request.get_json()
+        print(data)
+        
+        # Extract parameters
+        family_tree_id = data['family_tree_id']
+        node_id = data['node_id']
+        email = data['email']
+        
+        print(family_tree_id)
+        print(node_id)
+        print(email) 
+        
+        # Validate required parameters
+        if not all([family_tree_id, node_id, email]):
+            return jsonify({
+                'success': False,
+                'message': 'Missing required parameters: family_tree_id, node_id, and email are required'
+            }), 400
+        print("hi1")
+        # Validate user has permission to access this family tree
+        user_doc = user_profiles_ref.document(email).get()
+        if not user_doc.exists:
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+        print("hi2")    
+        user_data = user_doc.to_dict()
+        user_family_tree_id = user_data.get('familyTreeId')
+        
+        # Check if user has access to the requested family tree
+        # if user_family_tree_id != family_tree_id:
+        #     return jsonify({
+        #         'success': False,
+        #         'message': 'User does not have permission to access this family tree'
+        #     }), 403
+        
+        # Get the relatives tree with relationship labels
+        relatives_tree = get_extended_family(family_tree_id, node_id, db)
+        
+        # Log the relationships for debugging
+        logger.info(f"Retrieved {len(relatives_tree)} relatives for node {node_id} in tree {family_tree_id}")
+        relation_summary = [f"{node.get('name')}: {node.get('relation')}" for node in relatives_tree]
+        logger.info(f"Relationships: {relation_summary}")
+        print("hi3")
+        return jsonify({
+            'success': True,
+            'data': {
+                'relatives_tree': relatives_tree,
+                'centered_node_id': node_id
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in get-member-relatives-tree endpoint: {e}")
+        import traceback
+        error_details = traceback.format_exc()
+        return jsonify({
+            'success': False,
+            'message': str(e),
+            'details': error_details
+        }), 500
+
 
 if __name__ == '__main__':
     print("Starting Flask server...")
