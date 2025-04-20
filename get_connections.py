@@ -55,6 +55,17 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                 logger.info(f"Found {len(family_members)} family members")
                 logger.info(f"Relatives data structure: {type(relatives_data)}")
                 
+                # Set isSelf for all members
+                for member in family_members:
+                    if member.get('email') == email:
+                        member['isSelf'] = True
+                    else:
+                        member['isSelf'] = False
+                
+                # Build family relationships for all members first
+                family_members = build_family_relationships(family_members)
+                logger.info("Built family relationships for all members")
+                
                 # Process family members first
                 for member in family_members:
                     try:
@@ -62,10 +73,13 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                         member_id = member.get('id')
                         member_relatives = relatives_data.get(member_id, {})
                         
-                        # Check if user profile exists for family member
-                        member_profile = db.collection('user_profiles').document(member.get('email', '')).get()
-                        user_profile_exists = member_profile.exists if member.get('email') else False
-                        
+                        print(member.get('email'))
+                        email2=member.get('email')
+                        if email2:                        # Check if user profile exists for family member
+                            member_profile = db.collection('user_profiles').document(member.get('email', '')).get()
+                            user_profile_exists = member_profile.exists if member.get('email') else False
+                        else:
+                            user_profile_exists = False
                         # Add the family member
                         if user_profile_exists:
                             connections['family'].append({
@@ -78,7 +92,7 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                         else:
                             connections['family'].append({
                                 'email': member.get('email', ''),
-                                'name': member.get('name', ''),
+                                'fullname': member.get('name', ''),
                                 
                                 'gender': member.get('gender', ''),
                                 'maritalStatus': member.get('maritalStatus', ''),
@@ -94,9 +108,12 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                                 if isinstance(relative, dict):
                                     try:
                                         # Check if user profile exists for relative
-                                        relative_profile = db.collection('user_profiles').document(relative.get('email', '')).get()
-                                        relative_profile_exists = relative_profile.exists if relative.get('email') else False
-                                        
+                                        email3=relative.get('email')
+                                        if email3:
+                                            relative_profile = db.collection('user_profiles').document(relative.get('email', '')).get()
+                                            relative_profile_exists = relative_profile.exists if relative.get('email') else False
+                                        else:
+                                            relative_profile_exists = False
                                         if relative_profile_exists:
                                             connections['relatives'].append({
                                                 'email': relative.get('email', ''),
