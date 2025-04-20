@@ -1,6 +1,7 @@
 from typing import Dict, List, Any
 from firebase_admin import firestore
 from build_family_relationships import build_family_relationships
+from family_tree_relations import get_extended_family
 import logging
 
 # Configure logging
@@ -52,6 +53,7 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                 family_tree_data = family_tree_doc.to_dict()
                 family_members = family_tree_data.get('familyMembers', [])
                 relatives_data = family_tree_data.get('relatives', {})
+                print("relatives_data",relatives_data)
                 logger.info(f"Found {len(family_members)} family members")
                 logger.info(f"Relatives data structure: {type(relatives_data)}")
                 
@@ -71,10 +73,15 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                     try:
                         # Get the member's relatives if they exist
                         member_id = member.get('id')
-                        member_relatives = relatives_data.get(member_id, {})
+                        print("member_id",member_id)
+                        print("relatives_data",relatives_data)
+                        
+                        member_relatives=relatives_data.get(member_id, {})
+                        print("member_relatives",member_relatives)
                         
                         print(member.get('email'))
                         email2=member.get('email')
+                        print("member_relatives for email",email2,member_relatives)
                         if email2:                        # Check if user profile exists for family member
                             member_profile = db.collection('user_profiles').document(member.get('email', '')).get()
                             user_profile_exists = member_profile.exists if member.get('email') else False
@@ -103,40 +110,45 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                         
                         # Process relatives for this family member
                         if member_relatives:
-                            logger.info(f"Processing relatives for family member {member.get('name')}")
-                            for rel_id, relative in member_relatives.items():
-                                if isinstance(relative, dict):
-                                    try:
-                                        # Check if user profile exists for relative
-                                        email3=relative.get('email')
-                                        if email3:
-                                            relative_profile = db.collection('user_profiles').document(relative.get('email', '')).get()
-                                            relative_profile_exists = relative_profile.exists if relative.get('email') else False
-                                        else:
-                                            relative_profile_exists = False
-                                        if relative_profile_exists:
-                                            connections['relatives'].append({
-                                                'email': relative.get('email', ''),
-                                                'fullName': relative.get('name', ''),
-                                                'profileImage': relative.get('profileImage', ''),
-                                                'relation': f"relative of {member.get('name')}",
-                                                'userProfileExists': relative_profile_exists
-                                            })
-                                        else:
-                                            connections['relatives'].append({
-                                                'email': relative.get('email', ''),
-                                                'fullName': relative.get('name', ''),
-                                                'gender': relative.get('gender', ''),
-                                                'maritalStatus': relative.get('maritalStatus', ''),
-                                                'phone': relative.get('phone', ''),
-                                                'relation': f"relative of {member.get('name')}",
-                                                'userProfileExists': relative_profile_exists
-                                            })
-                                        logger.info(f"Added relative {relative.get('name')} for family member {member.get('name')}")
-                                    except Exception as e:
-                                        logger.warning(f"Error processing relative {rel_id} for family member {member_id}: {str(e)}")
-                                        continue
-                            
+                            try:
+                                # Get extended family data
+                                relatives_data = get_extended_family(member_relatives.get('familyTreeId'), member_relatives.get('originalNodeId'))
+                                
+                                if relatives_data:
+                                    for relative in relatives_data:
+                                        try:
+                                            # Check if user profile exists for relative
+                                            email3 = relative.get('email')
+                                            if email3:
+                                                relative_profile = db.collection('user_profiles').document(relative.get('email', '')).get()
+                                                relative_profile_exists = relative_profile.exists if relative.get('email') else False
+                                            else:
+                                                relative_profile_exists = False
+                                                
+                                            if relative_profile_exists:
+                                                connections['relatives'].append({
+                                                    'email': relative.get('email', ''),
+                                                    'fullName': relative.get('name', ''),
+                                                    'profileImage': relative.get('profileImage', ''),
+                                                    'relation': f"{relative.get('relation', '')} of {member.get('name')}",
+                                                    'userProfileExists': relative_profile_exists
+                                                })
+                                            else:
+                                                connections['relatives'].append({
+                                                    'email': relative.get('email', ''),
+                                                    'fullName': relative.get('name', ''),
+                                                    'gender': relative.get('gender', ''),
+                                                    'maritalStatus': relative.get('maritalStatus', ''),
+                                                    'phone': relative.get('phone', ''),
+                                                    'relation': f"{relative.get('relation', '')} of {member.get('name')}",
+                                                    'userProfileExists': relative_profile_exists
+                                                })
+                                        except Exception as e:
+                                            logger.warning(f"Error processing relative for family member {member_id}: {str(e)}")
+                                            continue
+                            except Exception as e:
+                                logger.warning(f"Error fetching relatives data for family member {member_id}: {str(e)}")
+                                continue
                     except Exception as e:
                         logger.warning(f"Error processing family member {member.get('id')}: {str(e)}")
                         continue
@@ -168,11 +180,19 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                             if profile_image and not profile_image.startswith('data:image/jpeg;base64,'):
                                 profile_image = f"data:image/jpeg;base64,{profile_image}"
                             
+                            # Check if user profile exists for friend
+                            friend_email = friend.get('email', '')
+                            user_profile_exists = False
+                            if friend_email:
+                                friend_profile = db.collection('user_profiles').document(friend_email).get()
+                                user_profile_exists = friend_profile.exists
+                            
                             connections['friends'].append({
-                                'email': friend.get('email', ''),
+                                'email': friend_email,
                                 'fullName': friend.get('name', ''),
                                 'profileImage': profile_image,
-                                'relation': category
+                                'relation': category,
+                                'userProfileExists': user_profile_exists
                             })
                             logger.info(f"Successfully added friend: {friend.get('email')}")
                         except Exception as e:
