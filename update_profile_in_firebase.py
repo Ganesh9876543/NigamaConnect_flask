@@ -7,13 +7,13 @@ import logging
 from werkzeug.utils import secure_filename
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO) 
 logger = logging.getLogger(__name__)
 
 import uuid
 
 def update_profile_in_firebase(email, data, user_profiles_ref,db):
-    """
+    """   
     Core function to update profile details in Firebase.
     
     :param email: The email of the user (used as the document ID).
@@ -40,9 +40,9 @@ def update_profile_in_firebase(email, data, user_profiles_ref,db):
             "lastName": last_name,
             "phone": phone,
             "DOB": data.get('dob'),
-            "GENDER": gender,
-            "CASTE": data.get('caste'),
-            "MARITAL_STATUS": data.get('maritalStatus')
+            "GENDER": gender.lower(),
+          
+          
         }
         user_ref.update(basic_profile_data)
 
@@ -146,10 +146,15 @@ def update_user_in_family_tree(db, email, first_name, last_name, phone, gender, 
                         family_members[i]['phone'] = phone
                     
                     if gender:
-                        family_members[i]['gender'] = gender
+                        family_members[i]['gender'] = gender.lower()
                     
                     if profile_image:
-                        family_members[i]['profileImage'] = profile_image
+                        # Add base64 prefix if not already present
+                        if profile_image and not profile_image.startswith('data:'):
+                            logger.info(f"Adding base64 prefix to profile image for user: {email}")
+                            family_members[i]['profileImage'] = 'data:image/jpeg;base64,' + profile_image
+                        else:
+                            family_members[i]['profileImage'] = profile_image
                     
                     updated = True
             
