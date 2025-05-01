@@ -53,7 +53,7 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                 family_tree_data = family_tree_doc.to_dict()
                 family_members = family_tree_data.get('familyMembers', [])
                 relatives_data = family_tree_data.get('relatives', {})
-                print("relatives_data",relatives_data)
+               
                 logger.info(f"Found {len(family_members)} family members")
                 logger.info(f"Relatives data structure: {type(relatives_data)}")
                 
@@ -74,8 +74,7 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                         # Get the member's relatives if they exist
                         member_id = member.get('id')
                         print("member_id",member_id)
-                        print("relatives_data",relatives_data)
-                        
+                        print("something",relatives_data)
                         member_relatives=relatives_data.get(member_id, {})
                         print("member_relatives",member_relatives)
                         
@@ -112,10 +111,10 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                         if member_relatives:
                             try:
                                 # Get extended family data
-                                relatives_data = get_extended_family(member_relatives.get('familyTreeId'), member_relatives.get('originalNodeId'))
+                                relatives_data_member = get_extended_family(member_relatives.get('familyTreeId'), member_relatives.get('originalNodeId'))
                                 
-                                if relatives_data:
-                                    for relative in relatives_data:
+                                if relatives_data_member:
+                                    for relative in relatives_data_member:
                                         try:
                                             # Check if user profile exists for relative
                                             email3 = relative.get('email')
@@ -142,7 +141,7 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                                                     'phone': relative.get('phone', ''),
                                                     'relation': f"{relative.get('relation', '')} of {member.get('name')}",
                                                     'userProfileExists': relative_profile_exists
-                                                })
+                                                }) 
                                         except Exception as e:
                                             logger.warning(f"Error processing relative for family member {member_id}: {str(e)}")
                                             continue
