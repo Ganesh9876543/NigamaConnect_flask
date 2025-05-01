@@ -11,5 +11,6 @@ graphviz
 python-dateutil
 uuid
 numpy
+flask-socketio
 
 
