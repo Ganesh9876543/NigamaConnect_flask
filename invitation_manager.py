@@ -431,8 +431,8 @@ def handle_friend_invitation_acceptance(invitation, db):
         print(f"[DEBUG] Additional data from invitation: {additional_data}")
         
         # Get the category/relationship selected by the sender for the recipient
-        sender_category = additional_data.get('category', 'Friends')
-        recipient_category = "Friends"
+        sender_category = invitation.get('category', 'Friends')
+        recipient_category = sender_category
         print(f"[DEBUG] Categories - Sender: {sender_category}, Recipient: {recipient_category}")
         
         # Use the new mutual friends function
