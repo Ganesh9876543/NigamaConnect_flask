@@ -73,6 +73,11 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                     try:
                         # Get the member's relatives if they exist
                         member_id = member.get('id')
+                        
+                        # check if member is self
+                        if member.get('email') == email:
+                            continue
+                        
                         print("member_id",member_id)
                         print("something",relatives_data)
                         member_relatives=relatives_data.get(member_id, {})
@@ -124,12 +129,23 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
                                             else:
                                                 relative_profile_exists = False
                                                 
+                                            # check if the relative member mail was matched with any member email in connection[family]   list then skip    
+                                            if relative_profile_exists and (relative.get('email') in [member.get('email') for member in connections['family']] or relative.get('email') == email):
+                                                continue
+                                        
+
+                                            relation_name=relative.get('relation', '')
+                                            if relation_name.lower() == 'myself':
+                                                relation_name = f'{member.get("relation")} (family member) '
+                                            else:
+                                                relation_name = f'{relative.get("relation")} of {member.get("name")}'
+                                                
                                             if relative_profile_exists:
                                                 connections['relatives'].append({
                                                     'email': relative.get('email', ''),
                                                     'fullName': relative.get('name', ''),
                                                     'profileImage': relative.get('profileImage', ''),
-                                                    'relation': f"{relative.get('relation', '')} of {member.get('name')}",
+                                                    'relation': relation_name,
                                                     'userProfileExists': relative_profile_exists
                                                 })
                                             else:
@@ -207,6 +223,13 @@ def get_user_connections(email: str) -> Dict[str, List[Dict[str, Any]]]:
             logger.info(f"No family tree ID found for user: {email}")
         
         logger.info(f"Successfully retrieved all connections for user: {email}")
+        
+        # remove duplicates from connections
+        connections['family'] = [item for n, item in enumerate(connections['family']) if item not in connections['family'][n + 1:]]
+        connections['relatives'] = [item for n, item in enumerate(connections['relatives']) if item not in connections['relatives'][n + 1:]]
+        connections['friends'] = [item for n, item in enumerate(connections['friends']) if item not in connections['friends'][n + 1:]]
+         
+        
         return connections
         
     except Exception as e:
