@@ -8,7 +8,7 @@ from io import BytesIO
 import base64
 import os
 import tempfile
-from PIL import Image, ImageDraw
+from PIL import Image,  ImageDraw
 import requests
 from io import BytesIO
 import pathlib
@@ -281,7 +281,7 @@ def generate_family_tree(family_data):
             
         label += f"<TR><TD COLSPAN='2' ALIGN='LEFT'>Gen: {member['generation']}</TD></TR>"
         label += "</TABLE>>"
-        
+         
         # Add node with proper styling
         dot.node(
             member['id'], 
