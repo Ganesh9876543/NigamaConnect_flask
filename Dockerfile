@@ -11,7 +11,10 @@ COPY . /app
 WORKDIR /app
 
 # Install Python dependencies from requirements.txt
-RUN pip install -r requirements.txt
+RUN pip install -r requirements.txt gunicorn eventlet
 
-# Command to run your application (adjust 'my_app.py' to your script's name)
-CMD ["python", "app.py"]
+# Expose the port your app runs on
+EXPOSE 5000
+
+# Command to run your application with Gunicorn instead of the development server
+CMD ["gunicorn", "--worker-class", "eventlet", "-w", "1", "--bind", "0.0.0.0:5000", "app:app"]
