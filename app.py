@@ -11,9 +11,28 @@ import uuid
 from datetime import datetime
 from flask_cors import CORS
 import logging
+from werkzeug.utils import secure_filename
 import hashlib
-import json
-import os
+from get_connections import get_user_connections
+from family_spouse_manager import (
+    add_spouse_relationship, 
+    handle_no_trees_scenario, 
+    create_family_tree_with_husband, 
+    create_family_tree_with_wife,
+    add_husband_to_family_tree,
+    add_wife_to_family_tree,
+    create_family_tree_with_husband_email,
+    create_family_tree_with_wife_email,
+    handle_both_spouses_have_trees
+)
+from invitation_manager import (
+    send_invitation, get_invitations, update_invitation_status, 
+    invitation_acceptance_handlers, TYPE_FRIEND, TYPE_FAMILY, 
+    STATUS_ACCEPTED, STATUS_REJECTED
+)
+from socket_manager import init_socketio, notify_user
+from family_child_manager import add_child_to_family_tree, create_family_tree_with_father_child, add_child_with_subtree
+from family_parent_manager import add_parents_to_family_tree, create_family_tree_with_parents, merge_family_trees
 
 
 from flask import Flask, request, jsonify
@@ -24,9 +43,14 @@ import os
 import logging
 from werkzeug.utils import secure_filename
 
+# Import the new friend manager module
+from friend_manager import add_noprofile_friend
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+
+# Initialize SocketIO
+socketio = init_socketio(app)
 
 # In-memory storage for OTPs with timestamps
 otp_storage = {}  # Will store {email: {'otp': '1234', 'timestamp': 1615293600}}
@@ -144,7 +168,7 @@ def cleanup_expired_otps():
     for email, data in otp_storage.items():
         if current_time - data['timestamp'] > OTP_EXPIRATION_TIME:
             expired_emails.append(email)
-    
+     
     for email in expired_emails:
         del otp_storage[email]
     
@@ -330,7 +354,9 @@ def get_profile():
     """
     try:
         # Get email from query parameter
+        print('request')
         email = request.args.get('email')
+        print('email',email)
         
         if not email:
             return jsonify({
@@ -357,7 +383,7 @@ def get_profile():
             # Check if user has a profile image
             current_image_id = user_data.get('currentProfileImageId')
             profile_image_base64 = None
-            
+            print(current_image_id)
             if current_image_id:
                 # Get profile image from subcollection
                 image_doc = user_profiles_ref.document(email).collection('profileImages').document(current_image_id).get()
@@ -379,6 +405,7 @@ def get_profile():
                 "maritalStatus": user_data.get('MARITAL_STATUS'),
                 "profileImage": profile_image_base64
             }
+            print('data')
             
             return jsonify({
                 "success": True,
@@ -647,7 +674,9 @@ def get_login_status_api():
             "success": False,
             "error": str(e)
         }), 500
-
+        
+        
+        
 @app.route('/api/profile/dashboard-image', methods=['POST'])
 def set_dashboard_profile():
     """
@@ -772,7 +801,7 @@ def get_dashboard_profile(email):
         return jsonify({
             "success": False,
             "error": str(e)
-        }), 500
+        }), 500 
       
         
 from fetch_all_profile_data import fetch_all_profile_data        
@@ -843,7 +872,7 @@ def update_profile():
             })
 
         # Call the core function to update the profile
-        result = update_profile_in_firebase(email, data, user_profiles_ref)
+        result = update_profile_in_firebase(email, data, user_profiles_ref,db)
 
         if result.get('success'):
             return jsonify(result), 200
@@ -870,10 +899,7 @@ def generate_tree():
         img_base64 = generate_family_tree(family_members)
         return jsonify({'image': img_base64})
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"Error generating family tree: {str(e)}\n{error_details}")
-        return jsonify({'error': str(e), 'details': error_details}), 500
+        return jsonify({'error': str(e)}), 500
 
 
 from search_profiles_by_info import search_profiles_by_info    
@@ -907,6 +933,7 @@ def search_profiles():
     except Exception as e:
         logger.error(f"Error in search-profiles endpoint: {e}")
         return jsonify({"error": str(e)}), 500
+    
 
 from sendinvite import save_received_invitation, save_sent_invitation   
 
@@ -953,6 +980,120 @@ def save_invitations():
     except Exception as e:
         logger.error(f"Error saving invitations: {str(e)}")
         return jsonify({"error": f"Failed to save invitations: {str(e)}"}), 500
+
+
+# @app.route('/api/profile/update', methods=['PUT'])
+# def update_profile():
+#     """
+#     API endpoint to update an existing user profile.
+#     Expects JSON data with user profile information and userId.
+#     """
+#     try:
+#         profile_data = request.json
+        
+#         # Validate userId
+#         user_id = profile_data.get('userId')
+#         if not user_id:
+#             return jsonify({
+#                 "success": False,
+#                 "error": "Missing userId"
+#             }), 400
+        
+#         # Update timestamp
+#         profile_data['updatedAt'] = datetime.now().isoformat()
+        
+#         # Update in Firebase
+#         if user_profiles_ref:
+#             doc_ref = user_profiles_ref.document(user_id)
+            
+#             # Check if document exists
+#             doc = doc_ref.get()
+#             if not doc.exists:
+#                 return jsonify({
+#                     "success": False,
+#                     "error": f"Profile with ID {user_id} not found"
+#                 }), 404
+                
+#             doc_ref.update(profile_data)
+#             logger.info(f"Profile updated with ID: {user_id}")
+            
+#             return jsonify({
+#                 "success": True,
+#                 "message": "Profile updated successfully"
+#             })
+#         else:
+#             # For development without Firebase
+#             return jsonify({
+#                 "success": True,
+#                 "message": "Development mode - update request received",
+#                 "data": profile_data
+#             })
+            
+#     except Exception as e:
+#         logger.error(f"Error updating profile: {e}")
+#         return jsonify({
+#             "success": False,
+#             "error": str(e)
+#         }), 500
+
+# @app.route('/api/profile/upload_photo', methods=['POST'])
+# def upload_profile_photo():
+#     """
+#     API endpoint to upload a profile photo.
+#     Expects a file and userId in the request.
+#     """
+#     try:
+#         # Check if the post request has the file part
+#         if 'file' not in request.files:
+#             return jsonify({
+#                 "success": False,
+#                 "error": "No file part"
+#             }), 400
+        
+#         file = request.files['file']
+#         user_id = request.form.get('userId')
+        
+#         # Validate userId
+#         if not user_id:
+#             return jsonify({
+#                 "success": False,
+#                 "error": "Missing userId"
+#             }), 400
+        
+#         # If the user does not select a file, the browser submits an empty file without a filename
+#         if file.filename == '':
+#             return jsonify({
+#                 "success": False,
+#                 "error": "No selected file"
+#             }), 400
+        
+#         if file and allowed_file(file.filename):
+#             filename = secure_filename(file.filename)
+#             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+#             file.save(file_path)
+            
+#             # Save the file path to the user's profile in Firebase
+#             if user_profiles_ref:
+#                 doc_ref = user_profiles_ref.document(user_id)
+#                 doc_ref.update({'profilePhotoUrl': file_path})
+            
+#             return jsonify({
+#                 "success": True,
+#                 "message": "File uploaded successfully",
+#                 "filePath": file_path
+#             })
+#         else:
+#             return jsonify({
+#                 "success": False,
+#                 "error": "File type not allowed"
+#             }), 400
+            
+#     except Exception as e:
+#         logger.error(f"Error uploading profile photo: {e}")
+#         return jsonify({
+#             "success": False,
+#             "error": str(e)
+#         }), 500
 
 @app.route('/api/family-tree/update', methods=['POST'])
 def update_family_tree():
@@ -1139,13 +1280,55 @@ def add_member():
 def update_family_tree_members():
     """
     API endpoint to update family tree IDs for each member in the family tree.
-    Takes family members data and a family tree ID.
+    Takes family members data, a family tree ID, and email data for self and father.
     Updates the family tree ID for each member based on their email.
+    Adds userProfileExists flag to each member indicating if their email has an existing profile.
     """
     try:
         data = request.json
         family_members = data.get('familyMembers', [])
         new_family_tree_id = data.get('familyTreeId')
+        self_email = data.get('selfEmail')
+        father_email = data.get('fatherEmail')
+        
+        # Essential email logs
+        print("self_email", self_email)
+        print("father_email", father_email)
+
+        if self_email is None:
+            self_email = ""
+            return jsonify({
+                "success": False,
+                "error": "Self email is required"
+            }), 400
+        if father_email is None:
+            father_email = ""
+            return jsonify({
+                "success": False,
+                "error": "Father email is required"
+            }), 400
+
+        # Convert family_members to list if it's a dictionary
+        if isinstance(family_members, dict):
+            # If it's a dictionary, convert it to a list of its values
+            family_members = list(family_members.values())
+        elif isinstance(family_members, str):
+            try:
+                # Try to parse the string as JSON
+                family_members = json.loads(family_members)
+                # If the parsed result is a dictionary, convert to list
+                if isinstance(family_members, dict):
+                    family_members = list(family_members.values())
+            except json.JSONDecodeError:
+                return jsonify({
+                    "success": False,
+                    "error": "Invalid family members data format"
+                }), 400
+        elif not isinstance(family_members, list):
+            return jsonify({
+                "success": False,
+                "error": "Family members must be a list or dictionary"
+            }), 400
 
         if not family_members or not new_family_tree_id:
             return jsonify({
@@ -1153,27 +1336,49 @@ def update_family_tree_members():
                 "error": "Family members data and family tree ID are required"
             }), 400
 
-        logger.info(f"Received request to update family tree members with ID: {new_family_tree_id}")
-
+        # Process each family member and check if their user profile exists
+        updated_family_members = []
         for member in family_members:
-            email = member.get('email')
-            if email:
-                # Fetch the user document for the member
-                user_doc = user_profiles_ref.document(email).get()
+            if isinstance(member, dict):
+                email = member.get('email')
+                if email:
+                    # Fetch the user document for the member
+                    user_doc = user_profiles_ref.document(email).get()
 
-                if user_doc.exists:
-                    # Update the family tree ID for this member
-                    user_profiles_ref.document(email).set({
-                        'familyTreeId': new_family_tree_id,
-                        'updatedAt': datetime.now().isoformat()
-                    }, merge=True)
-                    logger.info(f"Updated family tree ID for {email} to {new_family_tree_id}")
-                else:
-                    logger.warning(f"User with email {email} not found. Skipping update.")
+                        # Add userProfileExists flag to the member
+                    member['userProfileExists'] = user_doc.exists
+                        
+                        # Update the family tree ID if user exists
+                    if user_doc.exists:
+                        user_profiles_ref.document(email).set({
+                            'familyTreeId': new_family_tree_id,
+                            'updatedAt': datetime.now().isoformat()
+                        }, merge=True)
+                    else:
+                        logger.warning(f"User with email {email} not found. Skipping update.")
+                   
+                        member['userProfileExists'] = False
+                    
+                    updated_family_members.append(member)
+
+        # If self_email is provided, update the family tree ID for the self user
+        if self_email:
+            user_profiles_ref.document(self_email).set({
+                'familyTreeId': new_family_tree_id,
+                'updatedAt': datetime.now().isoformat()
+            }, merge=True)
+
+        # If father_email is provided, update the family tree ID for the father
+        if father_email:
+            user_profiles_ref.document(father_email).set({
+                'familyTreeId': new_family_tree_id,
+                'updatedAt': datetime.now().isoformat()
+            }, merge=True)
 
         return jsonify({
             "success": True,
-            "message": "Family tree IDs updated successfully for all members"
+            "message": "Family tree IDs updated successfully for all members",
+            "updatedFamilyMembers": updated_family_members
         })
 
     except Exception as e:
@@ -1186,7 +1391,6 @@ def update_family_tree_members():
 
 
         
-from family_spouse_manager import add_spouse_relationship
 
 import json
 @app.route('/api/family-tree/add-spouse', methods=['POST'])
@@ -1236,104 +1440,104 @@ def add_spouse_details():
         }), 500
         
         
-@app.route('/api/family-tree/add-relatives', methods=['POST'])
-def add_relatives():
-    """
-    API endpoint to add relatives to a specific node in a family tree.
-    Takes a family tree ID, node ID, and relatives tree structure.
-    Updates the family tree by adding the relatives to the specified node.
-    """
-    try:
-        # Extract data from the request
-        data = request.json
-        print("Received data:", data)  # Log incoming data for debugging
+# @app.route('/api/family-tree/add-relatives', methods=['POST'])
+# def add_relatives():
+#     """
+#     API endpoint to add relatives to a specific node in a family tree.
+#     Takes a family tree ID, node ID, and relatives tree structure.
+#     Updates the family tree by adding the relatives to the specified node.
+#     """
+#     try:
+#         # Extract data from the request
+#         data = request.json
+#         print("Received data:", data)  # Log incoming data for debugging
 
-        # Extract fields from request
-        family_tree_id = data.get('familyTreeId')
-        node_id = data.get('nodeId')
-        relatives_tree = data.get('relativesTree')
+#         # Extract fields from request
+#         family_tree_id = data.get('familyTreeId')
+#         node_id = data.get('nodeId')
+#         relatives_tree = data.get('relativesTree')
 
-        # Validate required fields
-        if not family_tree_id or not node_id or not relatives_tree:
-            print("Error: Missing required fields")
-            return jsonify({
-                "success": False,
-                "message": "Missing required fields. Please provide familyTreeId, nodeId, and relativesTree"
-            }), 400
+#         # Validate required fields
+#         if not family_tree_id or not node_id or not relatives_tree:
+#             print("Error: Missing required fields")
+#             return jsonify({
+#                 "success": False,
+#                 "message": "Missing required fields. Please provide familyTreeId, nodeId, and relativesTree"
+#             }), 400
 
-        # Log received fields
-        print(f"Received request to add relatives: "
-              f"Family Tree ID: {family_tree_id}, "
-              f"Node ID: {node_id}, "
-              f"Relatives count: {len(relatives_tree)}")
+#         # Log received fields
+#         print(f"Received request to add relatives: "
+#               f"Family Tree ID: {family_tree_id}, "
+#               f"Node ID: {node_id}, "
+#               f"Relatives count: {len(relatives_tree)}")
 
-        # Validate family tree exists
-        family_tree_doc = family_tree_ref.document(family_tree_id).get()
-        if not family_tree_doc.exists:
-            print(f"Error: Family tree not found: {family_tree_id}")
-            return jsonify({
-                "success": False,
-                "message": f"Family tree not found: {family_tree_id}"
-            }), 404
+#         # Validate family tree exists
+#         family_tree_doc = family_tree_ref.document(family_tree_id).get()
+#         if not family_tree_doc.exists:
+#             print(f"Error: Family tree not found: {family_tree_id}")
+#             return jsonify({
+#                 "success": False,
+#                 "message": f"Family tree not found: {family_tree_id}"
+#             }), 404
         
-        family_tree = family_tree_doc.to_dict()
+#         family_tree = family_tree_doc.to_dict()
         
-        # Debug: Print structure of family tree
-        print(f"Family tree structure: {family_tree.keys()}")
+#         # Debug: Print structure of family tree
+#         print(f"Family tree structure: {family_tree.keys()}")
         
-        # Handle both possible data structures - either directly in familyMembers or as a list
-        family_members = family_tree.get('familyMembers', {})
+#         # Handle both possible data structures - either directly in familyMembers or as a list
+#         family_members = family_tree.get('familyMembers', {})
         
-        # If family_members is a list, convert to dictionary with id as key
-        if isinstance(family_members, list):
-            family_members_dict = {member.get('id'): member for member in family_members}
-            print(f"Converted list to dict. Available IDs: {list(family_members_dict.keys())}")
-            family_members = family_members_dict
+#         # If family_members is a list, convert to dictionary with id as key
+#         if isinstance(family_members, list):
+#             family_members_dict = {member.get('id'): member for member in family_members}
+#             print(f"Converted list to dict. Available IDs: {list(family_members_dict.keys())}")
+#             family_members = family_members_dict
         
-        # Debug: Print available node IDs
-        print(f"Available node IDs: {list(family_members.keys())}")
+#         # Debug: Print available node IDs
+#         print(f"Available node IDs: {list(family_members.keys())}")
         
-        # Validate node exists in the family tree
-        if node_id not in family_members:
-            print(f"Error: Node ID {node_id} not found in family tree. Available IDs: {list(family_members.keys())}")
-            return jsonify({
-                "success": False,
-                "message": f"Node ID {node_id} not found in the specified family tree",
-                "availableIds": list(family_members.keys())
-            }), 404
+#         # Validate node exists in the family tree
+#         if node_id not in family_members:
+#             print(f"Error: Node ID {node_id} not found in family tree. Available IDs: {list(family_members.keys())}")
+#             return jsonify({
+#                 "success": False,
+#                 "message": f"Node ID {node_id} not found in the specified family tree",
+#                 "availableIds": list(family_members.keys())
+#             }), 404
 
-        # Get or initialize the relatives section
-        relatives = family_tree.get('relatives', {})
+#         # Get or initialize the relatives section
+#         relatives = family_tree.get('relatives', {})
         
-        # Update or create relatives entry for the specified node
-        relatives[node_id] = relatives_tree
+#         # Update or create relatives entry for the specified node
+#         relatives[node_id] = relatives_tree
         
-        # Update the family tree document
-        family_tree_ref.document(family_tree_id).set({
-            "relatives": relatives
-        }, merge=True)
+#         # Update the family tree document
+#         family_tree_ref.document(family_tree_id).set({
+#             "relatives": relatives
+#         }, merge=True)
         
-        print(f"Successfully added relatives to node {node_id} in family tree {family_tree_id}")
+#         print(f"Successfully added relatives to node {node_id} in family tree {family_tree_id}")
         
-        # Return success response
-        return jsonify({
-            "success": True,
-            "message": f"Relatives added successfully to node {node_id}",
-            "familyTreeId": family_tree_id,
-            "nodeId": node_id,
-            "relativesCount": len(relatives_tree)
-        })
+#         # Return success response
+#         return jsonify({
+#             "success": True,
+#             "message": f"Relatives added successfully to node {node_id}",
+#             "familyTreeId": family_tree_id,
+#             "nodeId": node_id,
+#             "relativesCount": len(relatives_tree)
+#         })
 
-    except Exception as e:
-        logger.error(f"Error adding relatives: {e}")
-        # Add more detailed error information
+#     except Exception as e:
+#         logger.error(f"Error adding relatives: {e}")
+#         # Add more detailed error information
        
         
-        return jsonify({
-            "success": False,
-            "error": str(e),
+#         return jsonify({
+#             "success": False,
+#             "error": str(e),
             
-        }), 500
+#         }), 500
         
         
 from generate_relatives_tree import generate_relatives_tree
@@ -1534,7 +1738,6 @@ def add_friend():
             "success": False,
             "error": str(e)
         }), 500
-        
 
 @app.route('/api/friends-tree/get-friends', methods=['GET'])
 def get_friends():
@@ -2000,8 +2203,7 @@ def generate_friends_tree(user_email, user_name, user_profile_image, friends_lis
                 print(f"Cleaned up temporary directory: {temp_dir}")
         except Exception as cleanup_error:
             print(f"Error cleaning up: {cleanup_error}")
- 
-from get_connections import get_user_connections
+
 @app.route('/api/get-connections', methods=['GET'])
 def get_connections():
     
@@ -2036,8 +2238,8 @@ def get_connections():
         return jsonify({
             'success': False,
             'message': str(e)
-        }), 500
-
+        }), 
+        
 from family_tree_relations import get_extended_family
 @app.route('/api/get-member-relatives-tree', methods=['POST'])
 def get_member_relatives_tree():
@@ -2069,22 +2271,22 @@ def get_member_relatives_tree():
         print(email) 
         
         # Validate required parameters
-        if not all([family_tree_id, node_id, email]):
+        if not all([family_tree_id, node_id]):
             return jsonify({
                 'success': False,
                 'message': 'Missing required parameters: family_tree_id, node_id, and email are required'
             }), 400
         print("hi1")
         # Validate user has permission to access this family tree
-        user_doc = user_profiles_ref.document(email).get()
-        if not user_doc.exists:
-            return jsonify({
-                'success': False,
-                'message': 'User not found'
-            }), 404
-        print("hi2")    
-        user_data = user_doc.to_dict()
-        user_family_tree_id = user_data.get('familyTreeId')
+        # user_doc = user_profiles_ref.document(email).get()
+        # if not user_doc.exists:
+        #     return jsonify({
+        #         'success': False,
+        #         'message': 'User not found'
+        #     }), 404
+        # print("hi2")    
+        # user_data = user_doc.to_dict()
+        user_family_tree_id = family_tree_id  
         
         # Check if user has access to the requested family tree
         # if user_family_tree_id != family_tree_id:
@@ -2119,7 +2321,1488 @@ def get_member_relatives_tree():
             'details': error_details
         }), 500
 
+@app.route('/api/users/get-names', methods=['POST'])
+def get_user_names():
+    """
+    API endpoint to get full names of users from a list of email addresses.
+    Takes a list of emails in the request body and returns the full names for each user.
+    """
+    try:
+        # Extract data from the request
+        data = request.json
+        print("Received data:", data)  # Log incoming data for debugging
+
+        # Extract emails from request
+        emails = data.get('emails', [])
+
+        if not emails or not isinstance(emails, list):
+            return jsonify({
+                "success": False,
+                "message": "Please provide a valid list of emails"
+            }), 400
+
+        # Log the number of emails received
+        print(f"Received request to get names for {len(emails)} emails")
+
+        # Initialize results dictionary
+        user_names = {}
+
+        # Get users data from Firestore
+        for email in emails:
+            if not email or not isinstance(email, str):
+                user_names[email] = None
+                continue
+
+            try:
+                # Get user document
+                user_doc = user_profiles_ref.document(email).get()
+                
+                if user_doc.exists:
+                    user_data = user_doc.to_dict()
+                    first_name = user_data.get('firstName', '')
+                    last_name = user_data.get('lastName', '')
+                    full_name = f"{first_name} {last_name}".strip()
+                    user_profile_exists = True
+                    
+                    # If name is empty, use email as fallback
+                    if not full_name:
+                        full_name = 'Unknown User'
+                else:
+                    full_name = 'User Not Found'
+                    user_profile_exists = False
+                
+                # Add to results
+                user_names[email] = {
+                    'fullName': full_name,
+                    'userProfileExists': user_profile_exists
+                }
+                
+            except Exception as e:
+                print(f"Error processing email {email}: {e}")
+                user_names[email] = {
+                    'fullName': 'Error',
+                    'userProfileExists': False,
+                    'error': str(e)
+                }
+
+        # Return results
+        return jsonify({
+            "success": True,
+            "userNames": user_names,
+            "count": len(user_names)
+        })
+
+    except Exception as e:
+        print(f"Error getting user names: {e}")
+        logger.error(f"Error getting user names: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+# Invitation Management API Endpoints
+@app.route('/api/invitations/send', methods=['POST'])
+def send_invitation_api():
+    """
+    API endpoint to send an invitation from one user to another.
+    
+    Request body should include:
+    - senderEmail: Email of the sending user
+    - recipientEmail: Email of the receiving user
+    - invitationType: Type of invitation (friend, family, relative, etc.)
+    - additionalData: Any additional data needed for the invitation
+    
+    Returns JSON with success status and invitation details or error message.
+    """
+    try:
+        # Extract data from request
+        data = request.json
+        sender_email = data.get('senderEmail')
+        recipient_email = data.get('recipientEmail')
+        invitation_type = data.get('invitationType')
+        additional_data = data.get('additionalData', {})
+        
+        print("=========== the data was ===============\n",data)
+        
+        # Validate required fields
+        if not all([sender_email, recipient_email, invitation_type]):
+            return jsonify({
+                "success": False,
+                "message": "Missing required fields: senderEmail, recipientEmail, and invitationType are required"
+            }), 400
+        
+        # Log the incoming data
+        logger.info(f"Received invitation request - Type: {invitation_type}")
+        logger.info(f"Additional data: {additional_data}")
+        
+        # Send the invitation with the additional data directly
+        success, result = send_invitation(
+            sender_email=sender_email,
+            recipient_email=recipient_email,
+            invitation_type=invitation_type,
+            data=additional_data,  # Pass additional_data directly
+            db=db,
+            user_profiles_ref=user_profiles_ref
+        )
+        
+        if success:
+            logger.info(f"Successfully sent invitation to {recipient_email}")
+            return jsonify({
+                "success": True,
+                "message": f"Invitation sent successfully to {recipient_email}",
+                "data": result
+            })
+        else:
+            logger.error(f"Failed to send invitation: {result}")
+            return jsonify({
+                "success": False,
+                "message": f"Failed to send invitation: {result}"
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Error sending invitation: {str(e)}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+@app.route('/api/invitations/get', methods=['GET'])
+def get_invitations_api():
+    """
+    API endpoint to get invitations for a user.
+    
+    Query parameters:
+    - email: Email of the user
+    - status (optional): Filter by status (pending, accepted, rejected)
+    - direction (optional): Filter by direction (sent, received)
+    
+    Returns JSON with success status and invitations or error message.
+    """
+    try:
+        # Extract query parameters
+        email = request.args.get('email')
+        status = request.args.get('status')
+        direction = request.args.get('direction')
+        
+        # Validate required parameters
+        if not email:
+            return jsonify({
+                "success": False,
+                "message": "Email parameter is required"
+            }), 400
+        
+        # Get invitations
+        success, result = get_invitations(
+            email=email,
+            status=status,
+            direction=direction,
+            db=db
+        )
+        
+        if success:
+            return jsonify({
+                "success": True,
+                "data": result
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": f"Failed to get invitations: {result}"
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Error getting invitations: {e}")
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+@app.route('/api/invitations/respond', methods=['POST'])
+def respond_to_invitation():
+    """
+    API endpoint to respond to an invitation (accept or reject).
+    
+    Request body should include:
+    - invitationId: ID of the invitation
+    - recipientEmail: Email of the recipient (the responder)
+    - status: New status (accepted, rejected)
+    
+    Returns JSON with success status and updated invitation or error message.
+    """
+    try:
+        # Extract data from request
+        data = request.json
+        invitation_id = data.get('invitationId')
+        recipient_email = data.get('recipientEmail')
+        status = data.get('status')
+        
+        # Validate required fields
+        if not all([invitation_id, recipient_email, status]):
+            return jsonify({
+                "success": False,
+                "message": "Missing required fields: invitationId, recipientEmail, and status are required"
+            }), 400
+        
+        # Validate status
+        if status not in [STATUS_ACCEPTED, STATUS_REJECTED]:
+            return jsonify({
+                "success": False,
+                "message": f"Invalid status: {status}. Must be 'accepted' or 'rejected'"
+            }), 400
+        
+        # Update the invitation status
+        success, result = update_invitation_status(
+            invitation_id=invitation_id,
+            recipient_email=recipient_email,
+            status=status,
+            db=db,
+            # Custom handler will be selected internally based on invitation type
+            custom_handler=None
+        )
+        
+        if success:
+            # If accepted, check if we need to perform additional actions
+            if status == STATUS_ACCEPTED:
+                invitation_type = result.get('updatedInvitation', {}).get('type')
+                
+                # Get sender information for notification
+                sender_email = result.get('updatedInvitation', {}).get('senderEmail')
+                
+                # Get recipient profile for a better notification
+                recipient_doc = user_profiles_ref.document(recipient_email).get()
+                recipient_name = recipient_email
+                
+                if recipient_doc.exists:
+                    recipient_data = recipient_doc.to_dict()
+                    first_name = recipient_data.get('firstName', '')
+                    last_name = recipient_data.get('lastName', '')
+                    recipient_name = f"{first_name} {last_name}".strip() or recipient_email
+                
+                # Prepare detailed notification data for sender
+                notification_data = {
+                    'invitationId': invitation_id,
+                    'recipientEmail': recipient_email,
+                    'recipientName': recipient_name,
+                    'status': status,
+                    'type': invitation_type,
+                    'timestamp': datetime.now().isoformat(),
+                    'message': f"{recipient_name} has accepted your {invitation_type} invitation"
+                }
+                
+                # Send real-time notification to sender
+                notify_user(sender_email, 'invitation_accepted', notification_data)
+                logger.info(f"Sent real-time acceptance notification to {sender_email}")
+                
+                # Handle invitation type-specific actions
+                if invitation_type in invitation_acceptance_handlers:
+                    try:
+                        handler = invitation_acceptance_handlers[invitation_type]
+                        handler_result = handler(result.get('updatedInvitation'), db)
+                        result['handlerResult'] = handler_result
+                        
+                        # Add additional handler result to notification
+                        notification_data['handlerResult'] = handler_result
+                        # Send a follow-up notification with the handler result
+                        notify_user(sender_email, 'invitation_processed', notification_data)
+                        
+                        # Send friend connection notification for friend invitations
+                        if invitation_type == TYPE_FRIEND and handler_result.get('success'):
+                            from socket_manager import notify_friend_connection
+                            notify_friend_connection(
+                                sender_email=sender_email,
+                                recipient_email=recipient_email,
+                                categories_info=handler_result
+                            )
+                            logger.info(f"Friend connection notification sent for {sender_email} and {recipient_email}")
+                            
+                    except Exception as handler_error:
+                        logger.error(f"Error in custom handler for {invitation_type}: {handler_error}")
+                        result['handlerError'] = str(handler_error)
+            elif status == STATUS_REJECTED:
+                # Get sender information for notification
+                sender_email = result.get('updatedInvitation', {}).get('senderEmail')
+                invitation_type = result.get('updatedInvitation', {}).get('type')
+                
+                # Get recipient profile for a better notification
+                recipient_doc = user_profiles_ref.document(recipient_email).get()
+                recipient_name = recipient_email
+                
+                if recipient_doc.exists:
+                    recipient_data = recipient_doc.to_dict()
+                    first_name = recipient_data.get('firstName', '')
+                    last_name = recipient_data.get('lastName', '')
+                    recipient_name = f"{first_name} {last_name}".strip() or recipient_email
+                
+                # Prepare notification data for rejection
+                notification_data = {
+                    'invitationId': invitation_id,
+                    'recipientEmail': recipient_email,
+                    'recipientName': recipient_name,
+                    'status': status,
+                    'type': invitation_type,
+                    'timestamp': datetime.now().isoformat(),
+                    'message': f"{recipient_name} has declined your {invitation_type} invitation"
+                }
+                
+                # Send real-time notification to sender
+                notify_user(sender_email, 'invitation_rejected', notification_data)
+                logger.info(f"Sent real-time rejection notification to {sender_email}")
+            
+            return jsonify({
+                "success": True,
+                "message": f"Invitation {status}",
+                "data": result
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": f"Failed to update invitation: {result}"
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Error responding to invitation: {e}")
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+@app.route('/api/invitations/notify', methods=['POST'])
+def notify_about_invitation():
+    """
+    API endpoint to send a notification about an invitation to a specific user.
+    
+    Request body should include:
+    - email: Email of the user to notify
+    - eventType: Type of notification event
+    - data: Notification data
+    
+    Returns JSON with success status or error message.
+    """
+    try:
+        # Extract data from request
+        data = request.json
+        email = data.get('email')
+        event_type = data.get('eventType')
+        notification_data = data.get('data', {})
+        
+        # Validate required fields
+        if not all([email, event_type]):
+            return jsonify({
+                "success": False,
+                "message": "Missing required fields: email and eventType are required"
+            }), 400
+        
+        # Send notification
+        success = notify_user(email, event_type, notification_data)
+        
+        if success:
+            return jsonify({
+                "success": True,
+                "message": f"Notification sent to {email}"
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Failed to send notification"
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Error sending notification: {e}")
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+# @app.route('/api/family-tree/add-child', methods=['POST'])
+# def add_child():
+#     """
+#     API endpoint to add a child to a parent in the family tree.
+#     Takes child node data, father's node ID, and family tree ID.
+#     Adds the child to the family tree with the father as the parent.
+#     """
+#     try:
+#         data = request.json
+#         child_data = data.get('childNode')
+#         father_node_id = data.get('fatherNodeId')
+#         family_tree_id = data.get('familyTreeId')
+
+#         if not child_data or not father_node_id or not family_tree_id:
+#             return jsonify({
+#                 "success": False,
+#                 "error": "Child data, father node ID, and family tree ID are required"
+#             }), 400
+
+#         logger.info(f"Received request to add child to father ID {father_node_id} in family tree {family_tree_id}")
+
+#         # Get the family tree document
+#         family_tree_doc = db.collection('family_tree').document(family_tree_id).get()
+        
+#         if not family_tree_doc.exists:
+#             return jsonify({
+#                 "success": False,
+#                 "message": f"Family tree not found: {family_tree_id}"
+#             }), 404
+
+#         family_tree = family_tree_doc.to_dict()
+#         family_members = family_tree.get('familyMembers', [])
+        
+#         # Check if father exists in the family tree
+#         father_exists = False
+#         for member in family_members:
+#             if member.get('id') == father_node_id:
+#                 father_exists = True
+#                 break
+                
+#         if not father_exists:
+#             return jsonify({
+#                 "success": False,
+#                 "message": f"Father node with ID {father_node_id} not found in the family tree"
+#             }), 404
+            
+#         # Add parentId to the child data
+#         child_data['parentId'] = father_node_id
+        
+#         # If the child doesn't have an ID, generate one
+#         if 'id' not in child_data:
+#             child_data['id'] = str(uuid.uuid4())
+            
+#         # Add the child to the family members list
+#         family_members.append(child_data)
+        
+#         # Update the family tree document
+#         db.collection('family_tree').document(family_tree_id).update({
+#             'familyMembers': family_members,
+#             'updatedAt': datetime.now().isoformat()
+#         })
+        
+#         # If the child has an email, update their profile with the family tree ID
+#         child_email = child_data.get('email')
+#         if child_email:
+#             user_profiles_ref.document(child_email).set({
+#                 'familyTreeId': family_tree_id,
+#                 'updatedAt': datetime.now().isoformat()
+#             }, merge=True)
+
+#         return jsonify({
+#             "success": True,
+#             "message": "Child added successfully to the family tree",
+#             "familyTreeId": family_tree_id,
+#             "childNodeId": child_data['id']
+#         })
+
+#     except Exception as e:
+#         logger.error(f"Error adding child to family tree: {e}")
+#         return jsonify({
+#             "success": False,
+#             "error": str(e)
+#         }), 500
+
+@app.route('/api/family-tree/add-child', methods=['POST'])
+def add_child_api():
+    """
+    API endpoint to add a child to a parent in the family tree.
+    Takes child node data, father's node ID, and family tree ID.
+    Adds the child to the family tree with the father as the parent.
+    """
+    try:
+        data = request.json
+        child_data = data.get('childNode')
+        father_node_id = data.get('fatherNodeId')
+        family_tree_id = data.get('familyTreeId')
+
+        if not child_data or not father_node_id or not family_tree_id:
+            return jsonify({
+                "success": False,
+                "error": "Child data, father node ID, and family tree ID are required"
+            }), 400
+
+        logger.info(f"Received request to add child to father ID {father_node_id} in family tree {family_tree_id}")
+
+        # Call the function from family_child_manager.py
+        family_tree_ref = db.collection('family_tree')
+        result = add_child_to_family_tree(
+            family_tree_ref,
+            user_profiles_ref,
+            family_tree_id,
+            father_node_id,
+            child_data
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in add_child_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/family-tree/create-with-father-child', methods=['POST'])
+def create_family_tree_with_child_api():
+    """
+    API endpoint to create a new family tree with a father and child.
+    Takes father email and child data.
+    Fetches father's details from their profile, 
+    creates a new family tree, adds both father and child to it,
+    and updates the family tree ID in the father's profile.
+    """
+    try:
+        data = request.json
+        father_email = data.get('fatherEmail')
+        child_data = data.get('childNode')
+
+        if not father_email or not child_data:
+            return jsonify({
+                "success": False,
+                "error": "Father email and child data are required"
+            }), 400
+
+        logger.info(f"Received request to create family tree with father {father_email} and child")
+
+        # Call the function from family_child_manager.py
+        family_tree_ref = db.collection('family_tree')
+        result = create_family_tree_with_father_child(
+            family_tree_ref,
+            user_profiles_ref,
+            father_email,
+            child_data
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in create_family_tree_with_child_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/family-tree/add-child-with-subtree', methods=['POST'])
+def add_child_with_subtree_api():
+    """
+    API endpoint to add a child to a father's family tree, with complex merging.
+    
+    Scenarios:
+    1. If child has no family tree: Creates a node for the child in father's tree
+    2. If child has own family tree: Merges the child's entire subtree into father's tree
+       including spouse, children, grandchildren, and all relatives
+    
+    Takes father's family tree ID, father's node ID, child's email, and child's birth order.
+    """
+    try:
+        data = request.json
+        father_family_tree_id = data.get('fatherFamilyTreeId')
+        father_node_id = data.get('fatherNodeId')
+        child_email = data.get('childEmail')
+        child_birth_order = data.get('childBirthOrder', 1)  # Default to 1 if not provided
+
+        if not father_family_tree_id or not father_node_id or not child_email:
+            return jsonify({
+                "success": False,
+                "error": "Father's family tree ID, father's node ID, and child's email are required"
+            }), 400
+
+        logger.info(f"Received request to add child {child_email} to father in family tree {father_family_tree_id}")
+
+        # Call the function from family_child_manager.py
+        family_tree_ref = db.collection('family_tree')
+        result = add_child_with_subtree(
+            family_tree_ref,
+            user_profiles_ref,
+            father_family_tree_id,
+            father_node_id,
+            child_email,
+            child_birth_order
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in add_child_with_subtree_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/family-tree/add-parents', methods=['POST'])
+def add_parents_api():
+    """
+    API endpoint to add parents (father and mother) to a child's family tree.
+    
+    Takes father node data, mother node data, child's family tree ID, and child's node ID.
+    Adds the parents to the child's family tree and updates the child's parentId.
+    
+    Both father and mother are optional, but at least one must be provided.
+    """
+    try:
+        data = request.json
+        father_node = data.get('fatherNode')
+        mother_node = data.get('motherNode')
+        child_family_tree_id = data.get('familyTreeId')
+        child_node_id = data.get('childNodeId')
+
+        # Validate required fields
+        if not child_family_tree_id or not child_node_id:
+            return jsonify({
+                "success": False,
+                "error": "Child's family tree ID and child node ID are required"
+            }), 400
+            
+        # Validate that at least one parent is provided
+        if not father_node and not mother_node:
+            return jsonify({
+                "success": False,
+                "error": "At least one parent (father or mother) data must be provided"
+            }), 400
+
+        logger.info(f"Received request to add parents to child ID {child_node_id} in family tree {child_family_tree_id}")
+
+        # Call the function from family_parent_manager.py
+        family_tree_ref = db.collection('family_tree')
+        result = add_parents_to_family_tree(
+            family_tree_ref,
+            user_profiles_ref,
+            child_family_tree_id,
+            child_node_id,
+            father_node,
+            mother_node
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in add_parents_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/family-tree/create-with-parents', methods=['POST'])
+def create_family_tree_with_parents_api():
+    """
+    API endpoint to create a new family tree for a child and add parents.
+    
+    Takes child's email, father node data (optional), and mother node data (optional).
+    Creates a new family tree with the child and parents, sets up the relationships,
+    and updates the family tree IDs in their profiles.
+    
+    Both father and mother are optional, but at least one must be provided.
+    """
+    try:
+        data = request.json
+        child_email1 = data.get('childNode')
+        father_node = data.get('fatherNode')
+        mother_node = data.get('motherNode')
+        print('child eail was ,',child_email1.get('email'))
+        child_email=child_email1.get('email')
+
+        # Validate required fields
+        if not child_email:
+            return jsonify({
+                "success": False,
+                "error": "Child's email is required"
+            }), 400
+            
+        # Validate that at least one parent is provided
+        if not father_node and not mother_node:
+            return jsonify({
+                "success": False,
+                "error": "At least one parent (father or mother) data must be provided"
+            }), 400
+
+        logger.info(f"Received request to create family tree for child {child_email} with parents")
+
+        # Call the function from family_parent_manager.py
+        family_tree_ref = db.collection('family_tree')
+        result = create_family_tree_with_parents(
+            family_tree_ref,
+            user_profiles_ref,
+            child_email,
+            father_node,
+            mother_node
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in create_family_tree_with_parents_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/family-tree/merge-trees', methods=['POST'])
+def merge_family_trees_api():
+    """
+    API endpoint to intelligently merge family trees between child and father.
+    
+    Takes:
+    - childEmail: Email of the child
+    - childFamilyTreeId: ID of the child's family tree
+    - childNodeId: ID of the child node in the family tree
+    - fatherEmail: Email of the father
+    """
+    try:
+        data = request.json
+        child_email = data.get('childEmail')
+        child_family_tree_id = data.get('childFamilyTreeId')
+        child_node_id = data.get('childNodeId')
+        father_email = data.get('fatherEmail')
+
+        # Validate required fields
+        if not child_email:
+            return jsonify({
+                "success": False,
+                "error": "Child email is required"
+            }), 400
+            
+        if not father_email:
+            return jsonify({
+                "success": False,
+                "error": "Father email is required"
+            }), 400
+
+        logger.info(f"Received request to merge family trees for child {child_email} with father {father_email}")
+
+        # Get father's profile to create father node data
+        father_profile = user_profiles_ref.document(father_email).get()
+        if not father_profile.exists:
+            return jsonify({
+                "success": False,
+                "error": f"Father profile not found for email: {father_email}"
+            }), 404
+
+        father_data = father_profile.to_dict()
+        father_node = {
+            'email': father_email,
+            'firstName': father_data.get('firstName', ''),
+            'lastName': father_data.get('lastName', ''),
+            'gender': 'male',
+            'nodeType': 'father'
+        }
+
+        # Call the function from family_parent_manager.py
+        family_tree_ref = db.collection('family_tree')
+        result = merge_family_trees(
+            family_tree_ref,
+            user_profiles_ref,
+            child_email,
+            father_node,
+            None,  # No mother node data
+            child_family_tree_id,
+            child_node_id
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in merge_family_trees_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/family-tree/create-with-husband', methods=['POST'])
+def create_family_tree_with_husband_api():
+    """
+    API endpoint to create a new family tree with a husband and add a wife.
+    
+    Takes husband node data and wife's email.
+    Fetches wife's details from her profile, creates a new family tree with the husband,
+    adds the wife node for the husband, and updates both profiles with the family tree ID.
+    """
+    try:
+        data = request.json
+        husband_node = data.get('husbandNode')
+        wife_email = data.get('wifeEmail')
+
+        if not husband_node or not wife_email:
+            return jsonify({
+                "success": False,
+                "error": "Husband node data and wife email are required"
+            }), 400
+
+        logger.info(f"Received request to create family tree with husband and wife {wife_email}")
+
+        # Call the function from family_spouse_manager.py
+        family_tree_ref = db.collection('family_tree')
+        result = create_family_tree_with_husband(
+            family_tree_ref,
+            user_profiles_ref,
+            husband_node,
+            wife_email
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in create_family_tree_with_husband_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/family-tree/create-with-wife', methods=['POST'])
+def create_family_tree_with_wife_api():
+    """
+    API endpoint to create a new family tree with a wife and add a husband.
+    
+    Takes wife node data and husband's email.
+    Fetches husband's details from his profile, creates a new family tree with the wife,
+    adds the husband node for the wife, and updates both profiles with the family tree ID.
+    """
+    try:
+        data = request.json
+        wife_node = data.get('wifeNode')
+        husband_email = data.get('husbandEmail')
+
+        if not wife_node or not husband_email:
+            return jsonify({
+                "success": False,
+                "error": "Wife node data and husband email are required"
+            }), 400
+
+        logger.info(f"Received request to create family tree with wife and husband {husband_email}")
+
+        # Call the function from family_spouse_manager.py
+        family_tree_ref = db.collection('family_tree')
+        result = create_family_tree_with_wife(
+            family_tree_ref,
+            user_profiles_ref,
+            wife_node,
+            husband_email
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in create_family_tree_with_wife_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/family-tree/add-husband', methods=['POST'])
+def add_husband_to_family_tree_api():
+    """
+    API endpoint to add a husband to an existing wife's family tree.
+    
+    Takes husband node data, wife node ID and wife's family tree ID.
+    Adds the husband to the wife's family tree, updates wife's last name to match husband's,
+    and updates both profiles with marital status.
+    """
+    try:
+        data = request.json
+        husband_node = data.get('husbandNode')
+        wife_node_id = data.get('wifeNodeId')
+        wife_family_tree_id = data.get('wifeFamilyTreeId')
+
+        if not husband_node or not wife_node_id or not wife_family_tree_id:
+            return jsonify({
+                "success": False,
+                "error": "Husband node data, wife node ID, and wife family tree ID are required"
+            }), 400
+
+        logger.info(f"Received request to add husband to wife's family tree {wife_family_tree_id}")
+
+        # Call the function from family_spouse_manager.py
+        family_tree_ref = db.collection('family_tree')
+        result = add_husband_to_family_tree(
+            family_tree_ref,
+            user_profiles_ref,
+            husband_node,
+            wife_node_id,
+            wife_family_tree_id
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in add_husband_to_family_tree_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/family-tree/add-wife', methods=['POST']) 
+def add_wife_to_family_tree_api(): 
+    """ 
+    API endpoint to add a wife to an existing husband's family tree.
+    
+    Takes wife node data, husband node ID and husband's family tree ID.
+    Adds the wife to the husband's family tree with the husband's last name,
+    and updates both profiles with marital status.
+    """
+    try:
+        data = request.json
+        wife_node = data.get('wifeNode')
+        husband_node_id = data.get('husbandNodeId')
+        husband_family_tree_id = data.get('husbandFamilyTreeId')
+
+        if not wife_node or not husband_node_id or not husband_family_tree_id:
+            return jsonify({
+                "success": False,
+                "error": "Wife node data, husband node ID, and husband family tree ID are required"
+            }), 400
+
+        logger.info(f"Received request to add wife to husband's family tree {husband_family_tree_id}")
+
+        # Call the function from family_spouse_manager.py
+        family_tree_ref = db.collection('family_tree')
+        result = add_wife_to_family_tree( 
+            family_tree_ref,
+            user_profiles_ref,
+            wife_node, 
+            husband_node_id,
+            husband_family_tree_id
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in add_wife_to_family_tree_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/family-tree/create-with-husband-email', methods=['POST'])
+def create_family_tree_with_husband_email_api():
+    """
+    API endpoint to create a new family tree with a husband and wife using their emails.
+    
+    Takes husband and wife emails, creates a family tree for husband,
+    and adds wife to it or handles existing trees as needed.
+    """
+    try:
+        data = request.json
+        husband_email = data.get('husbandEmail')
+        wife_email = data.get('wifeEmail')
+
+        if not husband_email or not wife_email:
+            return jsonify({
+                "success": False,
+                "error": "Husband email and wife email are required"
+            }), 400
+
+        logger.info(f"Received request to create family tree with husband email {husband_email} and wife email {wife_email}")
+
+        # Call the function from family_spouse_manager.py
+        family_tree_ref = db.collection('family_tree')
+        result = create_family_tree_with_husband_email(
+            family_tree_ref,
+            user_profiles_ref,
+            husband_email,
+            wife_email
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in create_family_tree_with_husband_email_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/family-tree/create-with-wife-email', methods=['POST'])
+def create_family_tree_with_wife_email_api():
+    """
+    API endpoint to create a new family tree with a wife and husband using their emails.
+    
+    Takes wife and husband emails, creates a family tree for wife,
+    and adds husband to it or handles existing trees as needed.
+    """
+    try:
+        data = request.json
+        wife_email = data.get('wifeEmail')
+        husband_email = data.get('husbandEmail')
+
+        if not wife_email or not husband_email:
+            return jsonify({
+                "success": False,
+                "error": "Wife email and husband email are required"
+            }), 400
+
+        logger.info(f"Received request to create family tree with wife email {wife_email} and husband email {husband_email}")
+
+        # Call the function from family_spouse_manager.py
+        family_tree_ref = db.collection('family_tree')
+        result = create_family_tree_with_wife_email(
+            family_tree_ref,
+            user_profiles_ref,
+            wife_email,
+            husband_email
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in create_family_tree_with_wife_email_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+from family_spouse_manager import (
+    adding_husband_to_family_tree,
+    adding_wife_to_family_tree
+)
+
+@app.route('/api/family-tree/addspouseforboth', methods=['POST'])
+def add_spouse_for_both_api():
+    """
+    API endpoint to add spouse relationship between husband and wife using their emails.
+    
+    Handles two cases when isTreeFound is true:
+    1. isAdding: "wife" - Add wife to husband's family tree
+    2. isAdding: "husband" - Add husband to wife's family tree
+    
+    If isTreeFound is false, it handles original scenarios:
+    1. If husband has no family tree but wife does - Create husband's tree and link to wife
+    2. If wife has no family tree but husband does - Add wife to husband's tree
+    3. If both have family trees - Link both trees and update references
+    4. If neither has a family tree - create new one
+    """
+    try:
+        data = request.json
+        logger.info(f"Received request to add spouse: {data}")
+        
+        # Check if isTreeFound exists and is true
+        if data.get('isTreeFound'):
+            # Check if the relationship is spouse
+            if data.get('relationship') == 'spouse':
+                # Case 1: Adding wife to husband's family tree
+                if data.get('isAdding') == 'wife':
+                    result = adding_wife_to_family_tree(
+                        family_tree_ref=db.collection('family_tree'),
+                        user_profiles_ref=user_profiles_ref,
+                        husband_family_tree_id=data.get('husbandFamilyTreeId'),
+                        husband_node_id=data.get('husbandNodeId'),
+                        husband_email=data.get('husbandEmail'),
+                        wife_email=data.get('wifeEmail')
+                    )
+                    return jsonify(result)
+                
+                # Case 2: Adding husband to wife's family tree
+                elif data.get('isAdding') == 'husband':
+                    result = adding_husband_to_family_tree(
+                        family_tree_ref=db.collection('family_tree'),
+                        user_profiles_ref=user_profiles_ref,
+                        wife_family_tree_id=data.get('wifeFamilyTreeId'),
+                        wife_node_id=data.get('wifeNodeId'),
+                        wife_email=data.get('wifeEmail'),
+                        husband_email=data.get('husbandEmail')
+                    )
+                    return jsonify(result)
+                else:
+                    return jsonify({
+                        "success": False,
+                        "error": "Invalid isAdding value. Must be 'husband' or 'wife'."
+                    }), 400
+            else:
+                return jsonify({
+                    "success": False,
+                    "error": "Relationship must be 'spouse' for this endpoint."
+                }), 400
+        
+        # Original functionality if isTreeFound is false
+        husband_email = data.get('husbandEmail')
+        wife_email = data.get('wifeEmail')
+
+        if not husband_email or not wife_email:
+            return jsonify({
+                "success": False,
+                "error": "Both husband email and wife email are required"
+            }), 400
+
+        logger.info(f"Processing original scenario for husband email {husband_email} and wife email {wife_email}")
+
+        # Get user profiles to check if they exist and have family trees
+        husband_profile_doc = user_profiles_ref.document(husband_email).get()
+        wife_profile_doc = user_profiles_ref.document(wife_email).get()
+        
+        if not husband_profile_doc.exists:
+            return jsonify({
+                "success": False,
+                "error": f"Husband profile not found for email {husband_email}"
+            }), 404
+            
+        if not wife_profile_doc.exists:
+            return jsonify({
+                "success": False,
+                "error": f"Wife profile not found for email {wife_email}"
+            }), 404
+            
+        husband_profile = husband_profile_doc.to_dict()
+        wife_profile = wife_profile_doc.to_dict()
+        
+        husband_family_tree_id = husband_profile.get('familyTreeId')
+        wife_family_tree_id = wife_profile.get('familyTreeId')
+        
+        family_tree_ref = db.collection('family_tree')
+        
+        # SCENARIO 1: Husband has no family tree but wife does
+        if not husband_family_tree_id and wife_family_tree_id:
+            result = create_family_tree_with_husband_email(
+                family_tree_ref,
+                user_profiles_ref,
+                husband_email,
+                wife_email
+            )
+        
+        # SCENARIO 2: Wife has no family tree but husband does
+        elif husband_family_tree_id and not wife_family_tree_id:
+            result = create_family_tree_with_wife_email(
+                family_tree_ref,
+                user_profiles_ref,
+                wife_email,
+                husband_email
+            )
+        
+        # SCENARIO 3: Both have family trees - needs special handling
+        elif husband_family_tree_id and wife_family_tree_id:
+            result = handle_both_spouses_have_trees(
+                family_tree_ref,
+                user_profiles_ref,
+                husband_email,
+                husband_family_tree_id,
+                wife_email,
+                wife_family_tree_id
+            )
+        
+        # SCENARIO 4: Neither has a family tree - create new
+        else:
+            result = create_family_tree_with_husband_email(
+                family_tree_ref,
+                user_profiles_ref,
+                husband_email,
+                wife_email
+            )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in add_spouse_for_both_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/invitations/send-spouse', methods=['POST'])
+def send_spouse_invitation_api():
+    """
+    API endpoint to send spouse relationship invitations.
+    
+    Handles the following data structures:
+    1. Family Tree Exists + Selected Member is Male (isAdding: 'wife')
+    2. Family Tree Exists + Selected Member is Female (isAdding: 'husband')
+    3. Family Tree Does Not Exist + Selected Member is Male (isAdding: 'wife')
+    4. Family Tree Does Not Exist + Selected Member is Female (isAdding: 'husband')
+    
+    Request body should include:
+    - senderEmail: Email of the sender
+    - recipientEmail: Email of the recipient
+    - isTreeFound: Whether a family tree exists
+    - isAdding: Which spouse is being added ('husband' or 'wife')
+    - relationship: Should be 'spouse'
+    - invitationType: Should be 'FAMILY'
+    
+    For when isTreeFound is true and isAdding is 'wife':
+    - husbandFamilyTreeId: ID of husband's family tree
+    - husbandNodeId: ID of husband in family tree
+    - husbandEmail: Email of the husband
+    - wifeEmail: Email of the wife
+    
+    For when isTreeFound is true and isAdding is 'husband':
+    - wifeFamilyTreeId: ID of wife's family tree
+    - wifeNodeId: ID of wife in family tree
+    - wifeEmail: Email of the wife
+    - husbandEmail: Email of the husband
+    
+    For when isTreeFound is false:
+    - husbandEmail/wifeEmail: Emails of the spouses
+    
+    Returns JSON with success status and invitation token or error message.
+    """
+    try:
+        # Extract data from request
+        data = request.json
+        logger.info(f"Received spouse invitation request: {data}")
+        
+        # Get basic invitation parameters
+        sender_email = data.get('senderEmail')
+        recipient_email = data.get('recipientEmail')
+        relationship = data.get('relationship')
+        invitation_type = data.get('invitationType')
+        is_tree_found = data.get('isTreeFound', False)
+        is_adding = data.get('isAdding')
+        
+        # Validate required fields
+        if not all([sender_email, recipient_email, relationship, is_adding]):
+            return jsonify({
+                "success": False,
+                "message": "Missing required fields: senderEmail, recipientEmail, relationship, and isAdding are required"
+            }), 400
+        
+        # Validate relationship type
+        if relationship != 'spouse':
+            return jsonify({
+                "success": False,
+                "message": f"Invalid relationship type: {relationship}. Must be 'spouse' for this endpoint."
+            }), 400
+            
+        # Prepare parameters based on invitation type
+        spouse_params = {
+            'is_tree_found': is_tree_found,
+            'is_adding': is_adding
+        }
+        
+        # Add specific parameters based on which spouse is being added and if tree exists
+        if is_adding == 'wife':
+            spouse_params['husband_email'] = data.get('husbandEmail')
+            spouse_params['wife_email'] = data.get('wifeEmail')
+            
+            if is_tree_found:
+                spouse_params['husband_family_tree_id'] = data.get('husbandFamilyTreeId')
+                spouse_params['husband_node_id'] = data.get('husbandNodeId')
+        
+        elif is_adding == 'husband':
+            spouse_params['wife_email'] = data.get('wifeEmail')
+            spouse_params['husband_email'] = data.get('husbandEmail')
+            
+            if is_tree_found:
+                spouse_params['wife_family_tree_id'] = data.get('wifeFamilyTreeId')
+                spouse_params['wife_node_id'] = data.get('wifeNodeId')
+        
+        else:
+            return jsonify({
+                "success": False,
+                "message": f"Invalid isAdding value: {is_adding}. Must be 'husband' or 'wife'."
+            }), 400
+        
+        # Add any additional data
+        additional_data = data.get('additionalData', {})
+        
+        # Send the invitation using invitation_manager
+        from invitation_manager import send_family_invitation
+        
+        result = send_family_invitation(
+            sender_email=sender_email,
+            recipient_email=recipient_email,
+            relationship_type='spouse',
+            db=db,
+            **spouse_params  # Unpack the spouse parameters
+        )
+        
+        if result.get('success'):
+            # Also notify the recipient about the invitation in real-time
+            # Get sender's profile for the notification
+            sender_doc = user_profiles_ref.document(sender_email).get()
+            sender_name = sender_email
+            
+            if sender_doc.exists:
+                sender_data = sender_doc.to_dict()
+                first_name = sender_data.get('firstName', '')
+                last_name = sender_data.get('lastName', '')
+                sender_name = f"{first_name} {last_name}".strip() or sender_email
+            
+            # Create notification data
+            notification_data = {
+                'invitationId': result.get('token'),
+                'senderEmail': sender_email,
+                'senderName': sender_name,
+                'type': 'family',
+                'relationshipType': 'spouse',
+                'isTreeFound': is_tree_found,
+                'isAdding': is_adding,
+                'message': f"You have received a spouse invitation from {sender_name}"
+            }
+            
+            # Add specific fields based on which spouse is being added
+            if is_adding == 'wife':
+                notification_data['husbandEmail'] = spouse_params['husband_email']
+                notification_data['wifeEmail'] = spouse_params['wife_email']
+                if is_tree_found:
+                    notification_data['husbandFamilyTreeId'] = spouse_params.get('husband_family_tree_id')
+                    notification_data['husbandNodeId'] = spouse_params.get('husband_node_id')
+            else:
+                notification_data['wifeEmail'] = spouse_params['wife_email']
+                notification_data['husbandEmail'] = spouse_params['husband_email']
+                if is_tree_found:
+                    notification_data['wifeFamilyTreeId'] = spouse_params.get('wife_family_tree_id')
+                    notification_data['wifeNodeId'] = spouse_params.get('wife_node_id')
+                    
+            # Add any additional data from the request
+            if additional_data:
+                notification_data['additionalData'] = additional_data
+            
+            # Send real-time notification to recipient
+            from socket_manager import notify_user
+            notify_user(recipient_email, 'new_invitation', notification_data)
+            
+            return jsonify({
+                "success": True,
+                "message": "Spouse invitation sent successfully",
+                "data": {
+                    "token": result.get('token'),
+                    "invitation": notification_data
+                }
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": result.get('message') or result.get('error'),
+                "error": result.get('error')
+            }), 400
+    
+    except Exception as e:
+        logger.error(f"Error sending spouse invitation: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"Error sending spouse invitation: {str(e)}",
+            "error": str(e)
+        }), 500
+
+@app.route('/api/add-friend-noprofile', methods=['POST'])
+def add_friend_noprofile_api():
+    try:
+        data = request.json
+        user_email = data.get('userEmail')
+        friend_first_name = data.get('firstName')
+        friend_last_name = data.get('lastName')
+        friend_category = data.get('category')
+        friend_email = data.get('email', None)  # Optional email
+
+        # Validate required fields
+        if not user_email:
+            return jsonify({"error": "User email is required"}), 400
+        if not friend_first_name or not friend_last_name:
+            return jsonify({"error": "Friend first name and last name are required"}), 400
+        if not friend_category:
+            return jsonify({"error": "Friend category is required"}), 400
+
+        # Get database references
+        db = firestore.client()
+        user_profiles_ref = db.collection('userProfiles')
+        
+        # Call the function to add a friend without a profile
+        result = add_noprofile_friend(
+            user_profiles_ref=user_profiles_ref,
+            user_email=user_email,
+            friend_first_name=friend_first_name,
+            friend_last_name=friend_last_name,
+            friend_category=friend_category,
+            friend_email=friend_email
+        )
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/friends/add-mutual', methods=['POST'])
+def add_mutual_friends_api():
+    """
+    API endpoint to add two users as mutual friends with their respective categories
+    Takes user1_email, user2_email, user1_category, and user2_category
+    Both users must have existing profiles
+    """
+    try:
+        # Extract data from the request
+        data = request.json
+        logger.info(f"Received data for mutual friends: {data}")
+        
+        # Extract required fields
+        user1_email = data.get('user1Email')
+        user2_email = data.get('user2Email')
+        user1_category = data.get('user1Category')  # Category assigned by user1 to user2
+        user2_category = data.get('user2Category')  # Category assigned by user2 to user1
+        
+        # Validate required fields
+        if not user1_email or not user2_email:
+            return jsonify({
+                "success": False,
+                "message": "Both user emails are required"
+            }), 400
+            
+        if not user1_category or not user2_category:
+            return jsonify({
+                "success": False,
+                "message": "Categories for both users are required"
+            }), 400
+            
+        # Get database instance
+        db = firestore.client()
+        
+        # Call the function to establish mutual friendship
+        from friend_manager import add_mutual_friends
+        result = add_mutual_friends(
+            db=db,
+            user1_email=user1_email,
+            user2_email=user2_email,
+            user1_category=user1_category,
+            user2_category=user2_category
+        )
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f"Error in add_mutual_friends_api: {str(e)}")
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(error_details)
+        return jsonify({
+            "success": False,
+            "message": f"Error establishing mutual friendship: {str(e)}",
+            "details": error_details
+        }), 500
 
 if __name__ == '__main__':
-    print("Starting Flask server...")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    print("Starting Flask server with SocketIO...")
+    # Use SocketIO instead of app.run() for WebSocket support
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
