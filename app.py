@@ -3707,10 +3707,10 @@ def add_friend_noprofile_api():
     try:
         data = request.json
         user_email = data.get('userEmail')
-        friend_first_name = data.get('firstName')
-        friend_last_name = data.get('lastName')
-        friend_category = data.get('category')
-        friend_email = data.get('email', None)  # Optional email
+        friend_first_name = data.get('friendFirstName')
+        friend_last_name = data.get('friendLastName')
+        friend_category = data.get('friendCategory')
+        friend_email = data.get('friendEmail', None)  # Optional email
 
         # Validate required fields
         if not user_email:
@@ -3721,12 +3721,12 @@ def add_friend_noprofile_api():
             return jsonify({"error": "Friend category is required"}), 400
 
         # Get database references
-        db = firestore.client()
-        user_profiles_ref = db.collection('userProfiles')
+        
+        user_profiles_ref = db.collection('user_profiles')
         
         # Call the function to add a friend without a profile
         result = add_noprofile_friend(
-            user_profiles_ref=user_profiles_ref,
+            db=db,
             user_email=user_email,
             friend_first_name=friend_first_name,
             friend_last_name=friend_last_name,
@@ -3801,7 +3801,6 @@ def add_mutual_friends_api():
             "message": f"Error establishing mutual friendship: {str(e)}",
             "details": error_details
         }), 500
-
 if __name__ == '__main__':
     print("Starting Flask server with SocketIO...")
     # Use SocketIO instead of app.run() for WebSocket support
