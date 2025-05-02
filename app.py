@@ -47,6 +47,8 @@ from werkzeug.utils import secure_filename
 # Import the new friend manager module
 from friend_manager import add_noprofile_friend
 
+from promocode_manager import add_promocode, get_promocode_details, update_tree_node_with_promocode
+
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
@@ -3830,6 +3832,190 @@ def add_mutual_friends_api():
             "message": f"Error establishing mutual friendship: {str(e)}",
             "details": error_details
         }), 500
+
+@app.route('/api/promocode/add', methods=['POST'])
+def add_promocode_api():
+    """
+    API endpoint to add a promo code for a user in a family tree.
+    
+    Takes:
+    - promocode: The promo code to add
+    - familyTreeId: ID of the family tree
+    - nodeId: ID of the node in the family tree
+    - name: Name of the user
+    - senderName: Name of the sender who created the promo code
+    
+    Returns:
+    - JSON with success status and result details
+    """
+    try:
+        # Extract data from request
+        data = request.json
+        promocode = data.get('promocode')
+        family_tree_id = data.get('familyTreeId')
+        node_id = data.get('nodeId')
+        name = data.get('name')
+        sender_name = data.get('senderName')
+        
+        # Validate required fields
+        if not all([promocode, family_tree_id, node_id, name, sender_name]):
+            return jsonify({
+                "success": False,
+                "error": "Missing required fields: promocode, familyTreeId, nodeId, name, and senderName are required"
+            }), 400
+        
+        logger.info(f"Received request to add promo code {promocode} for node {node_id} in family tree {family_tree_id}")
+        
+        # Call the function from promocode_manager.py
+        result = add_promocode(
+            db=db,
+            promocode=promocode,
+            family_tree_id=family_tree_id,
+            node_id=node_id,
+            name=name,
+            sender_name=sender_name
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 400
+            
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error in add_promocode_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/promocode/get', methods=['GET'])
+def get_promocode_api():
+    """
+    API endpoint to get promo code details including family relationships.
+    
+    Query Parameters:
+    - promocode: The promo code to retrieve details for
+    
+    Returns:
+    - JSON with success status and promo code details including family relationships
+    """
+    try:
+        # Get promocode from query parameters
+        promocode = request.args.get('promocode')
+        
+        if not promocode:
+            return jsonify({
+                "success": False,
+                "error": "Promocode parameter is required"
+            }), 400
+        
+        logger.info(f"Received request to get details for promo code: {promocode}")
+        
+        # Call the function from promocode_manager.py
+        result = get_promocode_details(
+            db=db,
+            promocode=promocode
+        )
+        
+        if not result.get("success"):
+            return jsonify(result), 404
+            
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error in get_promocode_api: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/update-tree-withpromocode', methods=['POST'])
+def update_tree_with_promocode():
+    """
+    API endpoint to update a node in a family tree with details like name, email, phone, and profileImage.
+    
+    Request body should include:
+    - familyTreeId: ID of the family tree
+    - nodeId: ID of the node to update
+    - name: Name of the user
+    - promocode: The promocode associated with this update
+    - email: Email of the user (optional)
+    - phone: Phone number of the user (optional)
+    - profileImage: Profile image data (base64 encoded, optional)
+    
+    Returns:
+    - JSON with success status and updated node details
+    """
+    try:
+        logger.info(f"Received request to /api/update-tree-withpromocode endpoint")
+        
+        # Extract data from request
+        data = request.json
+        family_tree_id = data.get('familyTreeId')
+        node_id = data.get('nodeId')
+        name = data.get('name')
+        promocode = data.get('promocode')
+        email = data.get('email') 
+        phone = data.get('phone')
+        has_profile_image = 'profileImage' in data
+        profile_image = data.get('profileImage')
+        
+        # Log request details without sensitive data
+        logger.info(f"Request parameters - Tree ID: {family_tree_id}, Node ID: {node_id}")
+        logger.info(f"Promocode: {promocode}")
+        logger.info(f"Has name: {bool(name)}, Has email: {bool(email)}, Has phone: {bool(phone)}, Has profile image: {has_profile_image}")
+        
+        # Validate required fields
+        if not all([family_tree_id, node_id, name, promocode]):
+            missing_fields = []
+            if not family_tree_id:
+                missing_fields.append("familyTreeId")
+            if not node_id:
+                missing_fields.append("nodeId")
+            if not name:
+                missing_fields.append("name")
+            if not promocode:
+                missing_fields.append("promocode")
+                
+            logger.error(f"Missing required fields: {', '.join(missing_fields)}")
+            return jsonify({
+                "success": False,
+                "error": f"Missing required fields: {', '.join(missing_fields)}"
+            }), 400
+        
+        logger.info(f"Validation successful, processing request")
+        
+        # Call the function from promocode_manager.py
+        logger.info(f"Calling update_tree_node_with_promocode function")
+        result = update_tree_node_with_promocode(
+            db=db,
+            family_tree_id=family_tree_id,
+            node_id=node_id,
+            name=name,
+            promocode=promocode,
+            email=email,
+            phone=phone,
+            profile_image=profile_image
+        )
+        
+        if not result.get("success"):
+            logger.error(f"Function call failed: {result.get('message') or result.get('error')}")
+            return jsonify(result), 404
+        
+        logger.info(f"Function call successful: {result.get('message')}")
+        logger.info(f"User has profile: {result.get('userHasProfile')}, Profile created: {result.get('profileCreated')}")
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error in update_tree_with_promocode API: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
 if __name__ == '__main__':
     print("Starting Flask server with SocketIO...")
     # Use SocketIO instead of app.run() for WebSocket support
