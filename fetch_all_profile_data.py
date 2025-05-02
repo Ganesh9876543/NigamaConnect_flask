@@ -101,7 +101,11 @@ def fetch_all_profile_data(email, user_profiles_ref):
             "maritalStatus": user_data.get('MARITAL_STATUS'),
             "profileImage": profile_image_base64,
             "additionalInfo": additional_info,
-            "uploadedPhotos": uploaded_photos  # Return as a list
+            "uploadedPhotos": uploaded_photos,  # Return as a list
+          
+            "familyTreeId": user_data.get('familyTreeId') or None,
+            
+            
         }
         
         return profile_data
