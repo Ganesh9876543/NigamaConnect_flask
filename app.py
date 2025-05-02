@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import random
 import smtplib
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import time
 from flask_cors import CORS  # Import CORS
 from flask import Flask, request, jsonify
@@ -69,10 +70,15 @@ EMAIL_ADDRESS = 'missionimpossible4546@gmail.com'
 EMAIL_PASSWORD = 'yuiugahripwqnbme'
 
 def send_email(to_email, subject, body):
-    msg = MIMEText(body)
+    # Create a MIMEMultipart message
+    msg = MIMEMultipart('alternative')
     msg['Subject'] = subject
     msg['From'] = EMAIL_ADDRESS
     msg['To'] = to_email
+
+    # Attach HTML version of the message
+    html_part = MIMEText(body, 'html')
+    msg.attach(html_part)
 
     with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
         server.starttls()
@@ -101,21 +107,44 @@ def send_otp():
 
     # Send OTP via email
     subject = 'Verify Your OTP to Access Nigama Connect'
-    body = (f"Dear User,\n\n"
-            f"Greetings from the Nigama Connect team!\n\n"
-            f"We're thrilled to have you as a part of our family-oriented social networking platform. Nigama Connect is designed to help you trace your lineage, connect with relatives, and strengthen bonds while exploring a range of exciting features like:\n"
-            f"- Family Tree Creation\n"
-            f"- Event Planning and RSVPs\n"
-            f"- Classifieds for Buying, Selling, and Services\n"
-            f"- Matrimony Search for Matchmaking\n"
-            f"- Professional Networking for Opportunities\n\n"
-            f"To ensure your account security, please verify your One-Time Password (OTP) below:\n\n"
-            f"Your OTP is: {otp}\n\n"
-            f"This OTP is valid for the next 10 minutes. Please do not share this code with anyone for your safety.\n\n"
-            f"If you did not initiate this request, please contact us immediately at missionimpossible4546@gmail.com.\n\n"
-            f"Thank you for joining us on this journey to celebrate heritage and create meaningful connections.\n\n"
-            f"Warm regards,\n"
-            f"The Nigama Connect Team")
+    body = f"""
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff;">
+        <h2 style="color: #007bff; margin-top: 0;">Welcome to Nigama Connect!</h2>
+        
+        <p>Dear User,</p>
+        
+        <p>Greetings from the Nigama Connect team!</p>
+        
+        <p>We're thrilled to have you as a part of our family-oriented social networking platform. Nigama Connect is designed to help you trace your lineage, connect with relatives, and strengthen bonds while exploring a range of exciting features like:</p>
+        
+        <ul style="padding-left: 20px;">
+            <li>Family Tree Creation</li>
+            <li>Event Planning and RSVPs</li>
+            <li>Classifieds for Buying, Selling, and Services</li>
+            <li>Matrimony Search for Matchmaking</li>
+            <li>Professional Networking for Opportunities</li>
+        </ul>
+        
+        <div style="background-color: #e8f4ff; padding: 15px; border-radius: 6px; margin: 20px 0; text-align: center; border: 1px dashed #007bff;">
+            <p style="margin: 0; font-size: 16px;">To ensure your account security, please verify with the One-Time Password below:</p>
+            <h1 style="color: #007bff; font-size: 32px; letter-spacing: 5px; margin: 15px 0;">{otp}</h1>
+            <p style="margin: 0; font-style: italic; color: #666;">This OTP is valid for the next 10 minutes only</p>
+        </div>
+        
+        <p style="color: #dc3545; font-weight: bold;">Please do not share this code with anyone for your safety.</p>
+        
+        <p>If you did not initiate this request, please contact us immediately at <a href="mailto:missionimpossible4546@gmail.com" style="color: #007bff;">missionimpossible4546@gmail.com</a>.</p>
+        
+        <p>Thank you for joining us on this journey to celebrate heritage and create meaningful connections.</p>
+        
+        <p>Warm regards,<br>
+        The Nigama Connect Team</p>
+    </div>
+</body>
+</html>
+"""
 
     try:
         print(f"Sending OTP email to {email}")
