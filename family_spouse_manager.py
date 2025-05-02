@@ -2145,6 +2145,7 @@ def adding_wife_to_family_tree(
         if not wife_first_name:
             wife_name = wife_profile.get('name', 'Unknown')
             logger.info(f"Using wife name: {wife_name} for parsing")
+        wife_name=f'{wife_first_name} {wife_last_name}'
         wife_name_parts = wife_name.split()
         wife_first_name = wife_name_parts[0] if wife_name_parts else 'Unknown'
         logger.info(f"Extracted wife first name: {wife_first_name}")
