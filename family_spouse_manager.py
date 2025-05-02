@@ -2126,6 +2126,7 @@ def adding_wife_to_family_tree(
         if not husband_first_name or not husband_last_name:
             husband_name = husband_node.get('name', 'Unknown')
             logger.info(f"Using husband node name: {husband_name} for parsing")
+        husband_name=husband_node.get('name')
         husband_name_parts = husband_name.split()
             
         if not husband_first_name:
@@ -2152,6 +2153,7 @@ def adding_wife_to_family_tree(
         
         # Get profile images
         husband_image_data = husband_node.get('profileImage')
+        husband_name=husband_node.get('name')
         wife_image_data = None
         
         # Fetch wife's profile image from Firestore
@@ -2624,13 +2626,15 @@ def adding_husband_to_family_tree(
                 "updatedAt": datetime.now().isoformat()
             })
              
-       
+            wife_profile_exists=wife_node.get('userProfileExists',False)
             if wife_profile_exists:
             # Update wife's profile with new name
                 user_profiles_ref.document(wife_email).set({
                     "name": wife_updated_name,
                     "lastName": husband_last_name,
                     "MARITAL_STATUS": "Married",
+                    "familyTreeId": husband_family_tree_id,
+                    "oldFamilyTreeId": wife_family_tree_id,
                     "updatedAt": datetime.now().isoformat()
                 }, merge=True)
         else:
