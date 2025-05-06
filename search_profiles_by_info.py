@@ -98,6 +98,7 @@ def search_profiles_by_info(first_name=None, last_name=None, email=None, phone=N
                 "firstName": profile.get('firstName', ''),
                 "lastName": profile.get('lastName', ''),
                 "phone": profile.get('phone', ''),
+                "gender": profile.get('GENDER', ''),
                 "currentProfileImageId": profile.get('currentProfileImageId')
             }
             all_profiles.append(profile_data)
@@ -163,6 +164,7 @@ def search_profiles_by_info(first_name=None, last_name=None, email=None, phone=N
                     "firstName": profile["firstName"],
                     "lastName": profile["lastName"],
                     "phone": profile["phone"],
+                    "gender": profile["GENDER"],
                     "profileImage": profile_image_base64,
                     "matchScore": score,
                     "matchReasons": match_reasons
@@ -180,6 +182,7 @@ def search_profiles_by_info(first_name=None, last_name=None, email=None, phone=N
                 "firstName": match["firstName"],
                 "lastName": match["lastName"],
                 "phone": match["phone"],
+                "gender": match["GENDER"],
                 "profileImage": match["profileImage"]
             }
             final_matches.append(final_match)
