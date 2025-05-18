@@ -196,7 +196,10 @@ def send_invitation(sender_email, recipient_email, invitation_type, data, db, us
                     'type': invitation_type,
                     'message': f"You have received a new {invitation_type} invitation from {sender_name}"
                 }
-                notify_user(recipient_email, 'new_invitation', notification_data)
+                notify_user(recipient_email, {
+                    'type': 'new_invitation',
+                    'data': notification_data
+                })
             
             return True, {
                 'invitationId': result,
