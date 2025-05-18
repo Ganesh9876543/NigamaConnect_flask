@@ -2674,7 +2674,7 @@ def respond_to_invitation():
                 }
                 
                 # Send real-time notification to sender
-                 notify_user(sender_email, {
+                notify_user(sender_email, {
                     'type': 'invitation_accepted',
                     'data': notification_data
                 })
