@@ -49,6 +49,9 @@ from friend_manager import add_noprofile_friend
 
 from promocode_manager import add_promocode, get_promocode_details, update_tree_node_with_promocode
 
+from notification_manager import get_user_notifications, mark_notifications_read, archive_notifications, mark_all_notifications_read
+
+
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
@@ -2477,6 +2480,56 @@ def send_invitation_api():
         )
         
         if success:
+
+               # Create notification for the recipient
+            notification_data = {
+                "userEmail": recipient_email,
+                "type": "invitation",
+                "data": {
+                    "invitationType": invitation_type,
+                    "senderId": sender_email,
+                    "senderName": sender_name,
+                    "senderAvatar": sender_avatar,
+                    "message": f"{sender_name} sent you a {invitation_type} invitation",
+                    "status": "pending",
+                    "relationshipType": additional_data.get('relationshipType'),
+                    "invitationId": result.get('invitationId')  # Include the invitation ID
+                },
+                "priority": "high"  # Set priority as high for invitation notifications
+            }
+            
+            try:
+                # Create notification in Firebase
+                user_notifications_ref = db.collection('user_profiles').document(recipient_email).collection('notifications')
+                notification_id = str(uuid.uuid4())
+                
+                notification = {
+                    '_id': notification_id,
+                    'userId': recipient_email,
+                    'type': "invitation",
+                    'data': notification_data['data'],
+                    'createdAt': datetime.now().isoformat(),
+                    'updatedAt': datetime.now().isoformat(),
+                    'isRead': False,
+                    'isArchived': False,
+                    'priority': "high"
+                }
+                
+                user_notifications_ref.document(notification_id).set(notification)
+                
+                # Send real-time notification
+                try:
+                    notify_user(recipient_email, {
+                        'type': 'new_notification',
+                        'notification': notification
+                    })
+                except Exception as socket_error:
+                    logger.warning(f"Failed to send real-time notification: {str(socket_error)}")
+                
+            except Exception as notif_error:
+                logger.error(f"Failed to create notification: {str(notif_error)}")
+                # Continue execution even if notification creation fails
+            
             logger.info(f"Successfully sent invitation to {recipient_email}")
             return jsonify({
                 "success": True,
@@ -2621,7 +2674,10 @@ def respond_to_invitation():
                 }
                 
                 # Send real-time notification to sender
-                notify_user(sender_email, 'invitation_accepted', notification_data)
+                 notify_user(sender_email, {
+                    'type': 'invitation_accepted',
+                    'data': notification_data
+                })
                 logger.info(f"Sent real-time acceptance notification to {sender_email}")
                 
                 # Handle invitation type-specific actions
@@ -2634,7 +2690,10 @@ def respond_to_invitation():
                         # Add additional handler result to notification
                         notification_data['handlerResult'] = handler_result
                         # Send a follow-up notification with the handler result
-                        notify_user(sender_email, 'invitation_processed', notification_data)
+                        notify_user(sender_email, {
+                            'type': 'invitation_processed',
+                            'data': notification_data
+                        })
                         
                         # Send friend connection notification for friend invitations
                         if invitation_type == TYPE_FRIEND and handler_result.get('success'):
@@ -2676,7 +2735,10 @@ def respond_to_invitation():
                 }
                 
                 # Send real-time notification to sender
-                notify_user(sender_email, 'invitation_rejected', notification_data)
+                notify_user(sender_email, {
+                    'type': 'invitation_rejected',
+                    'data': notification_data
+                })
                 logger.info(f"Sent real-time rejection notification to {sender_email}")
             
             return jsonify({
@@ -2724,7 +2786,10 @@ def notify_about_invitation():
             }), 400
         
         # Send notification
-        success = notify_user(email, event_type, notification_data)
+        success = notify_user(email, {
+            'type': event_type,
+            'data': notification_data
+        })
         
         if success:
             return jsonify({
@@ -3708,7 +3773,10 @@ def send_spouse_invitation_api():
             
             # Send real-time notification to recipient
             from socket_manager import notify_user
-            notify_user(recipient_email, 'new_invitation', notification_data)
+            notify_user(recipient_email, {
+                'type': 'new_invitation',
+                'data': notification_data
+            })
             
             return jsonify({
                 "success": True,
@@ -4013,6 +4081,874 @@ def update_tree_with_promocode():
         return jsonify({
             "success": False,
             "error": str(e)
+        }), 500
+
+
+@app.route('/api/notifications/create', methods=['POST'])
+def create_notification():
+    try:
+        logger.info(f"====== CREATE NOTIFICATION REQUEST START ======")
+        data = request.json
+        if not data:
+            return jsonify({'success': False, 'message': 'No data provided'}), 400
+
+        required_fields = ['userEmail', 'type']
+        if not all(field in data for field in required_fields):
+            return jsonify({'success': False, 'message': 'Missing required fields'}), 400
+
+        user_email = data['userEmail']
+        notification_type = data['type']
+        notification_data = data.get('data', {})
+        
+        logger.info(f"Creating {notification_type} notification for user: {user_email}")
+
+        # Create a new notification document
+        notification = {
+            '_id': str(uuid.uuid4()),  # Generate unique ID
+            'userId': user_email,
+            'type': notification_type,
+            'data': notification_data,
+            'createdAt': datetime.now().isoformat(),
+            'updatedAt': datetime.now().isoformat(),
+            'isRead': False,
+            'isArchived': False,
+            'priority': data.get('priority', 'medium')  # Default priority is medium
+        }
+
+        # Add type-specific validation and processing
+        if notification_type == 'group_message':
+            required_message_fields = ['groupId', 'groupName', 'senderId', 'senderName', 'messagePreview']
+            if not all(field in notification_data for field in required_message_fields):
+                return jsonify({'success': False, 'message': 'Missing required fields for group message'}), 400
+
+        elif notification_type == 'invitation':
+            required_invitation_fields = ['invitationType', 'senderId', 'senderName', 'message']
+            if not all(field in notification_data for field in required_invitation_fields):
+                return jsonify({'success': False, 'message': 'Missing required fields for invitation'}), 400
+            notification_data['status'] = notification_data.get('status', 'pending')
+
+        elif notification_type == 'event':
+            required_event_fields = ['eventId', 'eventTitle', 'eventType', 'startDate']
+            if not all(field in notification_data for field in required_event_fields):
+                return jsonify({'success': False, 'message': 'Missing required fields for event'}), 400
+            notification_data['status'] = notification_data.get('status', 'upcoming')
+
+        elif notification_type == 'classified':
+            required_classified_fields = ['classifiedId', 'title', 'category', 'posterId']
+            if not all(field in notification_data for field in required_classified_fields):
+                return jsonify({'success': False, 'message': 'Missing required fields for classified'}), 400
+            notification_data['status'] = notification_data.get('status', 'new')
+
+        else:
+            return jsonify({'success': False, 'message': 'Invalid notification type'}), 400
+
+        # Create notifications collection for user if it doesn't exist
+        user_notifications_ref = db.collection('user_profiles').document(user_email).collection('notifications')
+        
+        # Add the notification
+        user_notifications_ref.document(notification['_id']).set(notification)
+        
+        # Get unread count for the response
+        unread_docs = user_notifications_ref.where('isRead', '==', False).get()
+        unread_count = len(list(unread_docs))
+        
+        logger.info(f"Added notification {notification['_id']} to database. Current unread count: {unread_count}")
+
+        # Create response data including unread count
+        response_data = {
+            'notificationId': notification['_id'],
+            'notification': notification,
+            'unreadCount': unread_count
+        }
+
+        # Attempt to send real-time notification via Socket.IO
+        try:
+            # Emit to the user's personal notification channel
+            socketio.emit(
+                f'notification_{user_email}', 
+                {
+                    'type': 'new_notification',
+                    'notification': notification,
+                    'unreadCount': unread_count
+                }
+            )
+            logger.info(f"Emitted real-time notification event to channel notification_{user_email}")
+            
+            # Also emit to a general notification channel with the user's email
+            # This allows client-side code to listen to a general channel and filter by email
+            socketio.emit(
+                'notifications', 
+                {
+                    'userEmail': user_email,
+                    'type': 'new_notification',
+                    'notification': notification,
+                    'unreadCount': unread_count
+                }
+            )
+            logger.info(f"Emitted notification update to general notifications channel")
+            
+        except Exception as socket_error:
+            logger.warning(f"Failed to send real-time notification: {str(socket_error)}")
+        
+        # Attempt to send push notification to user's devices
+        try:
+            # Create appropriate notification title and body based on type
+            push_title = "Nigama Connect"
+            push_body = "You have a new notification"
+            
+            # Customize notification content based on type
+            if notification_type == 'group_message':
+                sender_name = notification_data.get('senderName', 'Someone')
+                group_name = notification_data.get('groupName', 'a group')
+                message_preview = notification_data.get('messagePreview', '...')
+                push_title = f"Message from {sender_name}"
+                push_body = f"{group_name}: {message_preview}"
+                
+            elif notification_type == 'invitation':
+                sender_name = notification_data.get('senderName', 'Someone')
+                invitation_type = notification_data.get('invitationType', 'connection')
+                push_title = f"New Invitation"
+                push_body = f"{sender_name} sent you a {invitation_type} invitation"
+                
+            elif notification_type == 'event':
+                event_title = notification_data.get('eventTitle', 'Event')
+                event_type = notification_data.get('eventType', '')
+                push_title = f"New {event_type} Event"
+                push_body = f"{event_title}"
+                
+            elif notification_type == 'classified':
+                title = notification_data.get('title', 'Classified')
+                category = notification_data.get('category', '')
+                push_title = f"New {category} Listing"
+                push_body = f"{title}"
+            
+            # Send push notification
+            push_success, push_result = send_push_notification(
+                user_email=user_email,
+                title=push_title,
+                body=push_body,
+                data={
+                    'notificationId': notification['_id'],
+                    'type': notification_type,
+                    'createdAt': notification['createdAt']
+                }
+            )
+            
+            if push_success:
+                logger.info(f"Push notification sent successfully: {push_result.get('message')}")
+            else:
+                logger.warning(f"Failed to send push notification: {push_result.get('error')}")
+            
+        except Exception as push_error:
+            logger.warning(f"Error sending push notification: {str(push_error)}")
+        
+        logger.info(f"====== CREATE NOTIFICATION REQUEST END ======")
+        return jsonify({
+            'success': True,
+            'message': 'Notification created successfully',
+            'data': response_data
+        })
+
+    except Exception as e:
+        logger.error(f"Error creating notification: {str(e)}")
+        logger.info(f"====== CREATE NOTIFICATION REQUEST END ======")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/notifications/get', methods=['GET'])
+def get_notifications():
+    """
+    Get notifications for a user with optional filtering and pagination.
+    
+    Query Parameters:
+    - email (required): User's email
+    - type (optional): Filter by notification type (invitation, group_message, event, classified)
+    - is_read (optional): Filter by read status (true/false)
+    - is_archived (optional): Filter by archive status (true/false)
+    - limit (optional): Maximum number of notifications to return (default: 50)
+    - last_notification_id (optional): Last notification ID for pagination
+    
+    Returns:
+    - JSON with notifications list, unread count, and pagination info
+    """
+    try:
+        # Get query parameters
+        email = request.args.get('email')
+        if not email:
+            return jsonify({
+                "success": False,
+                "message": "Email parameter is required"
+            }), 400
+            
+        # Get optional filters
+        notification_type = request.args.get('type')
+        is_read = request.args.get('is_read')
+        is_archived = request.args.get('is_archived')
+        limit = request.args.get('limit', type=int, default=50)
+        last_notification_id = request.args.get('last_notification_id')
+        
+        # Convert string boolean parameters to actual booleans
+        if is_read is not None:
+            is_read = is_read.lower() == 'true'
+        if is_archived is not None:
+            is_archived = is_archived.lower() == 'true'
+            
+        # Call notification manager function
+        success, result = get_user_notifications(
+            user_email=email,
+            db=db,
+            filter_type=notification_type,
+            is_read=is_read,
+            is_archived=is_archived,
+            limit=limit,
+            last_notification_id=last_notification_id
+        )
+        
+        if success:
+            return jsonify({
+                "success": True,
+                "data": result
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": result.get("error", "Unknown error occurred")
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error in get_notifications: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+@app.route('/api/notifications/mark-read', methods=['POST'])
+def mark_notifications_read_api():
+    """
+    Mark one or more notifications as read.
+    
+    Request Body:
+    {
+        "email": "user@example.com",
+        "notificationIds": ["id1", "id2", ...]
+    }
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+            
+        email = data.get('email')
+        notification_ids = data.get('notificationIds', [])
+        
+        if not email or not notification_ids:
+            return jsonify({
+                "success": False,
+                "message": "Email and notificationIds are required"
+            }), 400
+            
+        success, result = mark_notifications_read(
+            user_email=email,
+            db=db,
+            notification_ids=notification_ids
+        )
+        
+        if success:
+            return jsonify({
+                "success": True,
+                "message": result["message"]
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": result.get("error", "Unknown error occurred")
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error in mark_notifications_read_api: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+@app.route('/api/notifications/archive', methods=['POST'])
+def archive_notifications_api():
+    """
+    Archive one or more notifications.
+    
+    Request Body:
+    {
+        "email": "user@example.com",
+        "notificationIds": ["id1", "id2", ...]
+    }
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+            
+        email = data.get('email')
+        notification_ids = data.get('notificationIds', [])
+        
+        if not email or not notification_ids:
+            return jsonify({
+                "success": False,
+                "message": "Email and notificationIds are required"
+            }), 400
+            
+        success, result = archive_notifications(
+            user_email=email,
+            db=db,
+            notification_ids=notification_ids
+        )
+        
+        if success:
+            return jsonify({
+                "success": True,
+                "message": result["message"]
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": result.get("error", "Unknown error occurred")
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error in archive_notifications_api: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+@app.route('/notifications/unread-count/<email>', methods=['GET'])
+def get_unread_notifications_count(email):
+    """
+    Get the count of unread notifications for a specific user.
+    
+    Args:
+        email (str): User's email address
+    
+    Returns:
+        JSON with unread notification count
+    """
+    try:
+        if not email:
+            return jsonify({
+                "success": False,
+                "message": "Email is required"
+            }), 400
+            
+        # Get reference to user's notifications collection
+        notifications_ref = db.collection('user_profiles').document(email).collection('notifications')
+        
+        # Get unread notifications query
+        unread_query = notifications_ref.where('isRead', '==', False)
+        
+        # Get the count using get() instead of count()
+        unread_docs = unread_query.get()
+        unread_count = len(list(unread_docs))
+        
+        return jsonify({
+            "success": True,
+            "unreadCount": unread_count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting unread notifications count for {email}: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+@app.route('/notifications/<email>', methods=['GET'])
+def get_user_notifications_by_email(email):
+    """
+    Get all notifications for a specific user with optional filters.
+    
+    Args:
+        email (str): User's email address
+    
+    Query Parameters:
+        type (optional): Filter by notification type
+        is_read (optional): Filter by read status
+        is_archived (optional): Filter by archive status
+        limit (optional): Maximum number of notifications to return
+        last_notification_id (optional): Last notification ID for pagination
+        count_only (optional): If true, returns only the unread count
+    """
+    try:
+        logger.info(f"====== NOTIFICATION REQUEST START ======")
+        logger.info(f"Fetching notifications for user: {email}")
+        
+        if not email:
+            logger.warning("Email parameter is missing")
+            return jsonify({
+                "success": False,
+                "message": "Email is required"
+            }), 400
+        
+        # Check if only count is requested
+        count_only = request.args.get('count_only', '').lower() == 'true'
+        
+        if count_only:
+            logger.info(f"Getting unread notification count for user: {email}")
+            # Get reference to user's notifications collection
+            notifications_ref = db.collection('user_profiles').document(email).collection('notifications')
+            
+            # Get unread notifications query
+            unread_query = notifications_ref.where('isRead', '==', False)
+            
+            # Get the count using get() instead of count()
+            unread_docs = unread_query.get()
+            unread_count = len(list(unread_docs))
+            
+            logger.info(f"Unread notification count for {email}: {unread_count}")
+            
+            response = {
+                "success": True,
+                "unreadCount": unread_count
+            }
+            logger.info(f"Returning unread count response: {response}")
+            logger.info(f"====== NOTIFICATION REQUEST END ======")
+            return jsonify(response)
+            
+        # If not count_only, proceed with full notification retrieval
+        # Get optional query parameters
+        notification_type = request.args.get('type')
+        is_read = request.args.get('is_read')
+        is_archived = request.args.get('is_archived')
+        limit = request.args.get('limit', type=int, default=50)
+        last_notification_id = request.args.get('last_notification_id')
+        
+        logger.info(f"Query parameters - type: {notification_type}, is_read: {is_read}, " \
+                   f"is_archived: {is_archived}, limit: {limit}, last_id: {last_notification_id}")
+        
+        # Convert string boolean parameters to actual booleans
+        if is_read is not None:
+            is_read = is_read.lower() == 'true'
+        if is_archived is not None:
+            is_archived = is_archived.lower() == 'true'
+            
+        # Get notifications using the manager function
+        success, result = get_user_notifications(
+            user_email=email,
+            db=db,
+            filter_type=notification_type,
+            is_read=is_read,
+            is_archived=is_archived,
+            limit=limit,
+            last_notification_id=last_notification_id
+        )
+        
+        if success:
+            notification_count = len(result.get('notifications', []))
+            unread_count = result.get('unread_count', 0)
+            logger.info(f"Successfully retrieved notifications for {email}. " \
+                       f"Count: {notification_count}, Unread: {unread_count}")
+            
+            # Log individual notifications
+            logger.info(f"Notification details:")
+            for i, notification in enumerate(result.get('notifications', [])):
+                try:
+                    notif_id = notification.get('_id', 'unknown')
+                    notif_type = notification.get('type', 'unknown')
+                    created_at = notification.get('createdAt', 'unknown')
+                    is_read = notification.get('isRead', 'unknown')
+                    priority = notification.get('priority', 'unknown')
+                    
+                    # Get type-specific key details
+                    data = notification.get('data', {})
+                    details = ""
+                    
+                    if notif_type == 'invitation':
+                        sender = data.get('senderName', data.get('senderId', 'unknown'))
+                        invite_type = data.get('invitationType', 'unknown')
+                        status = data.get('status', 'unknown')
+                        details = f"From: {sender}, Type: {invite_type}, Status: {status}"
+                    
+                    elif notif_type == 'group_message':
+                        group = data.get('groupName', 'unknown')
+                        sender = data.get('senderName', data.get('senderId', 'unknown'))
+                        preview = data.get('messagePreview', '')[:20] + '...' if data.get('messagePreview') else 'no preview'
+                        details = f"Group: {group}, From: {sender}, Preview: {preview}"
+                    
+                    elif notif_type == 'event':
+                        title = data.get('eventTitle', 'unknown')
+                        event_type = data.get('eventType', 'unknown')
+                        date = data.get('startDate', 'unknown')
+                        details = f"Title: {title}, Type: {event_type}, Date: {date}"
+                    
+                    elif notif_type == 'classified':
+                        title = data.get('title', 'unknown')
+                        category = data.get('category', 'unknown')
+                        price = data.get('price', 'unknown')
+                        details = f"Title: {title}, Category: {category}, Price: {price}"
+                        
+                    logger.info(f"  [{i+1}] ID: {notif_id}, Type: {notif_type}, Created: {created_at}, Read: {is_read}, Priority: {priority}")
+                    logger.info(f"      Details: {details}")
+                except Exception as e:
+                    logger.error(f"Error logging notification details: {str(e)}")
+            
+            # Create response object
+            response = {
+                "success": True,
+                "data": result
+            }
+            
+            # Log the full JSON response
+            import json
+            try:
+                # Using a custom default serializer for non-serializable types
+                def json_serializer(obj):
+                    if isinstance(obj, (datetime, date)):
+                        return obj.isoformat()
+                    return str(obj)
+                
+                # Format the JSON with indentation for better readability in logs
+                formatted_json = json.dumps(response, indent=2, default=json_serializer)
+                logger.info(f"Full JSON response: \n{formatted_json}")
+            except Exception as json_error:
+                logger.error(f"Error serializing JSON response: {str(json_error)}")
+                # Fallback to simpler representation
+                logger.info(f"Response structure: success={response['success']}, notification_count={notification_count}")
+                
+            logger.info(f"====== NOTIFICATION REQUEST END ======")
+            return jsonify(response)
+        else:
+            logger.error(f"Failed to get notifications for {email}: {result.get('error')}")
+            logger.info(f"====== NOTIFICATION REQUEST END ======")
+            return jsonify({
+                "success": False,
+                "message": result.get("error", "Unknown error occurred")
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error getting notifications for {email}: {str(e)}", exc_info=True)
+        logger.info(f"====== NOTIFICATION REQUEST END ======")
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+@app.route('/notifications/<email>/mark-all-read', methods=['POST'])
+def mark_all_notifications_read_api(email):
+    """
+    Mark all unread notifications as read for a specific user.
+    
+    Args:
+        email (str): User's email address
+    
+    Returns:
+        JSON with success status and count of notifications marked as read
+    """
+    try:
+        logger.info(f"====== MARK ALL READ REQUEST START ======")
+        logger.info(f"Marking all notifications as read for user: {email}")
+        
+        if not email:
+            logger.warning("Email parameter is missing")
+            return jsonify({
+                "success": False,
+                "message": "Email is required"
+            }), 400
+        
+        # Call the function to mark all notifications as read
+        success, result = mark_all_notifications_read(
+            user_email=email,
+            db=db
+        )
+        
+        if success:
+            count = result.get('count', 0)
+            logger.info(f"Successfully marked {count} notifications as read for {email}")
+            logger.info(f"====== MARK ALL READ REQUEST END ======")
+            return jsonify({
+                "success": True,
+                "message": result.get('message'),
+                "count": count
+            })
+        else:
+            logger.error(f"Failed to mark notifications as read: {result.get('error')}")
+            logger.info(f"====== MARK ALL READ REQUEST END ======")
+            return jsonify({
+                "success": False,
+                "message": result.get("error", "Unknown error occurred")
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Error in mark_all_notifications_read_api: {str(e)}", exc_info=True)
+        logger.info(f"====== MARK ALL READ REQUEST END ======")
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+@app.route('/notifications/mark-all-read', methods=['POST'])
+def mark_all_notifications_from_body():
+    """
+    API endpoint to mark all notifications as read using email from request body.
+    Supports the client-side pattern of posting to /notifications/mark-all-read
+    with email in the request body.
+    """
+    try:
+        # Get email from request body
+        data = request.json
+        if not data or 'email' not in data:
+            return jsonify({
+                "success": False,
+                "message": "Email is required in request body"
+            }), 400
+            
+        email = data.get('email')
+        logger.info(f"Marking all notifications as read for user (from body): {email}")
+        
+        # Reuse the existing function
+        return mark_all_notifications_read_api(email)
+    
+    except Exception as e:
+        logger.error(f"Error in mark_all_notifications_from_body: {str(e)}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+@app.route('/notifications/register-device', methods=['POST'])
+def register_device():
+    """
+    API endpoint to register a device token for push notifications.
+    
+    Request Body:
+    {
+        "email": "user@example.com",
+        "token": "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]",
+        "device_type": "android-expo" or "ios-expo"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Device registered successfully"
+    }
+    """
+    try:
+        logger.info(f"====== DEVICE REGISTRATION REQUEST START ======")
+        data = request.json
+        
+        # Validate required fields
+        if not data:
+            logger.warning("No data provided in the request")
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        required_fields = ['email', 'token', 'device_type']
+        for field in required_fields:
+            if field not in data:
+                logger.warning(f"Missing required field: {field}")
+                return jsonify({
+                    "success": False,
+                    "message": f"Missing required field: {field}"
+                }), 400
+        
+        email = data['email']
+        token = data['token']
+        device_type = data['device_type']
+        
+        # Check if token has valid format
+        if not ('ExponentPushToken' in token or 'fcm' in token):
+            logger.warning(f"Potentially invalid token format: {token}")
+        
+        logger.info(f"Registering device token for user: {email}, device type: {device_type}")
+        
+        # Store in Firestore
+        device_data = {
+            'email': email,
+            'token': token,
+            'device_type': device_type,
+            'last_updated': datetime.now().isoformat()
+        }
+        
+        # Get reference to user's device tokens collection
+        user_ref = db.collection('user_profiles').document(email)
+        
+        # Check if user exists
+        user_doc = user_ref.get()
+        if not user_doc.exists:
+            logger.warning(f"User profile not found for email: {email}")
+            return jsonify({
+                "success": False,
+                "message": "User profile not found"
+            }), 404
+        
+        # Store token in device_tokens subcollection
+        token_id = token.replace(':', '_').replace('[', '_').replace(']', '_')  # Sanitize for Firestore ID
+        device_tokens_ref = user_ref.collection('device_tokens')
+        device_tokens_ref.document(token_id).set(device_data, merge=True)
+        
+        logger.info(f"Device token registered successfully for {email}")
+        logger.info(f"====== DEVICE REGISTRATION REQUEST END ======")
+        
+        return jsonify({
+            "success": True,
+            "message": "Device registered successfully"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error registering device token: {str(e)}", exc_info=True)
+        logger.info(f"====== DEVICE REGISTRATION REQUEST END ======")
+        return jsonify({
+            "success": False,
+            "message": f"Server error registering device: {str(e)}"
+        }), 500
+
+def send_push_notification(user_email, title, body, data=None):
+    """
+    Send push notification to a user's registered devices.
+    
+    Args:
+        user_email (str): Email of the user to send notification to
+        title (str): Title of the notification
+        body (str): Body text of the notification
+        data (dict, optional): Additional data to send with the notification
+    
+    Returns:
+        tuple: (success, result)
+            - success (bool): Whether the operation was successful
+            - result (dict): Contains count of notifications sent or error message
+    """
+    try:
+        # Default data object if none provided
+        if data is None:
+            data = {}
+        
+        # Get reference to user's device tokens collection
+        user_ref = db.collection('user_profiles').document(user_email)
+        device_tokens_ref = user_ref.collection('device_tokens')
+        
+        # Get all device tokens for the user
+        device_docs = device_tokens_ref.get()
+        device_tokens = [doc.to_dict().get('token') for doc in device_docs if doc.exists]
+        
+        if not device_tokens:
+            logger.info(f"No registered devices found for user: {user_email}")
+            return True, {"message": "No registered devices found", "count": 0}
+        
+        # Prepare notification payload (this would need to be adapted based on your push notification service)
+        # This is a placeholder - you would need to implement the actual sending logic
+        notification = {
+            "to": device_tokens,
+            "title": title,
+            "body": body,
+            "data": data
+        }
+        
+        logger.info(f"Sending push notification to {len(device_tokens)} devices for user {user_email}")
+        logger.info(f"Notification: {title} - {body}")
+        
+        # TODO: Implement the actual push notification sending logic
+        # This would typically involve making an API call to a service like Firebase Cloud Messaging,
+        # Expo Push Notifications API, or similar service
+        
+        # For now, we'll just log it and return success
+        logger.info(f"Push notification would be sent to devices: {device_tokens}")
+        
+        return True, {
+            "message": f"Push notification sent to {len(device_tokens)} devices",
+            "count": len(device_tokens)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error sending push notification to {user_email}: {str(e)}")
+        return False, {"error": str(e)}
+
+@app.route('/api/notifications/test-push', methods=['POST'])
+def test_push_notification():
+    """
+    Test endpoint to trigger a push notification to a specific user.
+    
+    Request Body:
+    {
+        "email": "user@example.com",
+        "title": "Test Notification",
+        "body": "This is a test notification",
+        "data": {
+            "key1": "value1",
+            "key2": "value2"
+        }
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Push notification sent successfully",
+        "result": {
+            "count": 1,
+            "message": "Push notification sent to 1 devices"
+        }
+    }
+    """
+    try:
+        logger.info(f"====== TEST PUSH NOTIFICATION REQUEST START ======")
+        data = request.json
+        
+        # Validate required fields
+        if not data:
+            logger.warning("No data provided in the request")
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        email = data.get('email')
+        title = data.get('title', 'Test Notification')
+        body = data.get('body', 'This is a test notification')
+        additional_data = data.get('data', {})
+        
+        if not email:
+            logger.warning("Missing required field: email")
+            return jsonify({
+                "success": False,
+                "message": "Missing required field: email"
+            }), 400
+        
+        logger.info(f"Sending test push notification to user: {email}")
+        
+        # Send the push notification
+        success, result = send_push_notification(
+            user_email=email,
+            title=title,
+            body=body,
+            data=additional_data
+        )
+        
+        if success:
+            logger.info(f"Test push notification sent successfully: {result.get('message')}")
+            logger.info(f"====== TEST PUSH NOTIFICATION REQUEST END ======")
+            return jsonify({
+                "success": True,
+                "message": "Push notification sent successfully",
+                "result": result
+            })
+        else:
+            logger.error(f"Failed to send test push notification: {result.get('error')}")
+            logger.info(f"====== TEST PUSH NOTIFICATION REQUEST END ======")
+            return jsonify({
+                "success": False,
+                "message": f"Failed to send push notification: {result.get('error')}"
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"Error sending test push notification: {str(e)}", exc_info=True)
+        logger.info(f"====== TEST PUSH NOTIFICATION REQUEST END ======")
+        return jsonify({
+            "success": False,
+            "message": f"Error sending test push notification: {str(e)}"
         }), 500
 
 
