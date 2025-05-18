@@ -18,19 +18,21 @@ connected_users = {}
 user_status = {}  # {email: {'status': 'online'|'offline', 'lastSeen': timestamp}}
 
 def init_socketio(app):
-    """Initialize SocketIO with the Flask app"""
+    """Initialize Socket.IO with the Flask app."""
     global socketio
     socketio = SocketIO(app, cors_allowed_origins="*")
-    register_handlers(socketio)
+    
+    # Setup event handlers
+    setup_socket_handlers(socketio)
+    
     return socketio
 
-def register_handlers(socketio):
-    """Register all socket event handlers"""
+def setup_socket_handlers(socketio):
+    """Setup Socket.IO event handlers."""
     
     @socketio.on('connect')
     def handle_connect():
-        logger.info(f"Client connected: {request.sid}")
-        emit('connection_response', {'status': 'connected'})
+        logger.info(f"Client connected: {socketio.request.sid}")
 
     @socketio.on('disconnect')
     def handle_disconnect():
@@ -164,7 +166,7 @@ def register_handlers(socketio):
                     if key not in ['action', 'invitationId', 'userEmail', 'targetEmail']:
                         notification_data[key] = value
                 
-                notify_user(target_email, 'invitation_action_notification', notification_data)
+                notify_user(target_email, notification_data)
                 
                 emit('invitation_action_response', {
                     'status': 'success',
@@ -182,40 +184,123 @@ def register_handlers(socketio):
             logger.error(f"Error handling invitation action: {str(e)}")
             emit('invitation_action_response', {'status': 'error', 'message': str(e)})
 
-def notify_user(email, event_type, data):
-    """Send a notification to a specific user by email"""
+    @socketio.on('join_user_channel')
+    def handle_join_user_channel(data):
+        """Handle user joining their personal notification channel."""
+        try:
+            if 'userEmail' not in data:
+                logger.error("join_user_channel: Missing userEmail in data")
+                return {'success': False, 'message': 'userEmail is required'}
+            
+            user_email = data['userEmail']
+            channel = f'notification_{user_email}'
+            
+            # Join the room
+            socketio.server.enter_room(socketio.request.sid, channel)
+            logger.info(f"User {user_email} joined channel: {channel}")
+            
+            return {'success': True, 'message': f'Joined channel: {channel}'}
+        except Exception as e:
+            logger.error(f"Error in join_user_channel: {str(e)}")
+            return {'success': False, 'message': str(e)}
+    
+    @socketio.on('leave_user_channel')
+    def handle_leave_user_channel(data):
+        """Handle user leaving their personal notification channel."""
+        try:
+            if 'userEmail' not in data:
+                logger.error("leave_user_channel: Missing userEmail in data")
+                return {'success': False, 'message': 'userEmail is required'}
+            
+            user_email = data['userEmail']
+            channel = f'notification_{user_email}'
+            
+            # Leave the room
+            socketio.server.leave_room(socketio.request.sid, channel)
+            logger.info(f"User {user_email} left channel: {channel}")
+            
+            return {'success': True, 'message': f'Left channel: {channel}'}
+        except Exception as e:
+            logger.error(f"Error in leave_user_channel: {str(e)}")
+            return {'success': False, 'message': str(e)}
+    
+    @socketio.on('join_global_notifications')
+    def handle_join_global_notifications():
+        """Handle user joining the global notifications channel."""
+        try:
+            # Join the room
+            socketio.server.enter_room(socketio.request.sid, 'notifications')
+            logger.info(f"Client {socketio.request.sid} joined global notifications channel")
+            
+            return {'success': True, 'message': 'Joined global notifications channel'}
+        except Exception as e:
+            logger.error(f"Error in join_global_notifications: {str(e)}")
+            return {'success': False, 'message': str(e)}
+
+    logger.info("Socket.IO event handlers have been set up")
+    return socketio
+
+def notify_user(user_email, event_data):
+    """
+    Send a notification to a specific user via Socket.IO.
+    
+    Args:
+        user_email (str): Email of the user to notify
+        event_data (dict): Event data containing type and notification info
+    
+    Returns:
+        bool: True if notification was sent, False otherwise
+    """
+    global socketio
     if not socketio:
-        logger.error("SocketIO not initialized")
+        logger.error("Socket.IO not initialized")
         return False
     
     try:
-        # Check if user is online
-        is_online = email in connected_users
+        # Add timestamp if not present
+        if isinstance(event_data, dict) and 'timestamp' not in event_data:
+            event_data['timestamp'] = datetime.now().isoformat()
         
-        # Add timestamp to notification
-        if 'timestamp' not in data:
-            data['timestamp'] = datetime.now().isoformat()
+        # Emit to the user's personal notification channel
+        user_channel = f'notification_{user_email}'
+        socketio.emit(user_channel, event_data)
+        logger.info(f"Notification sent to channel {user_channel}")
         
-        # Add current online status
-        data['recipientOnline'] = is_online
-        
-        # Emit to the room named after the user's email
-        socketio.emit(event_type, data, room=email)
-        logger.info(f"Notification sent to {email}, event: {event_type}, online: {is_online}")
-        
-        # If the event is invitation related, also send a generic notification
-        if event_type in ['invitation_accepted', 'invitation_rejected', 'invitation_processed', 'new_invitation']:
-            socketio.emit('invitation_notification', {
-                'type': event_type,
-                'data': data,
-                'timestamp': data.get('timestamp')
-            }, room=email)
-            logger.info(f"Generic invitation notification sent to {email}")
+        # Also emit to the global notifications channel
+        socketio.emit('notifications', {
+            'userEmail': user_email,
+            'data': event_data
+        })
+        logger.info(f"Notification sent to global channel for {user_email}")
         
         return True
+    
     except Exception as e:
-        logger.error(f"Error sending notification to {email}: {str(e)}")
+        logger.error(f"Error sending notification to {user_email}: {str(e)}")
         return False
+
+def notify_friend_connection(sender_email, recipient_email, categories_info):
+    """Send a friend connection notification to both users."""
+    global socketio
+    if socketio:
+        # Notify sender
+        sender_room = f'user_{sender_email}'
+        socketio.emit('friend_connection', {
+            'email': recipient_email,
+            'category': categories_info.get('senderCategory', 'Friend'),
+            'status': 'accepted'
+        }, room=sender_room)
+        
+        # Notify recipient
+        recipient_room = f'user_{recipient_email}'
+        socketio.emit('friend_connection', {
+            'email': sender_email,
+            'category': categories_info.get('recipientCategory', 'Friend'),
+            'status': 'accepted'
+        }, room=recipient_room)
+        
+        return True
+    return False
 
 def get_connected_users():
     """Get list of currently connected users"""
@@ -229,51 +314,4 @@ def get_user_status(email):
     """Get a user's online status and last seen time"""
     if email in user_status:
         return user_status[email]
-    return {'status': 'unknown', 'lastSeen': None}
-
-def notify_friend_connection(sender_email, recipient_email, categories_info):
-    """
-    Send a real-time notification about a new friend connection
-    
-    Args:
-        sender_email (str): Email of the invitation sender
-        recipient_email (str): Email of the invitation recipient
-        categories_info (dict): Information about the categories selected by both users
-    """
-    try:
-        # Notify sender
-        if sender_email in connected_users:
-            notification_data = {
-                'event': 'friend_connection_established',
-                'recipientEmail': recipient_email,
-                'senderCategory': categories_info.get('user1Category'),
-                'recipientCategory': categories_info.get('user2Category'),
-                'timestamp': datetime.now().isoformat(),
-                'message': f"You are now connected with {recipient_email} as friends"
-            }
-            
-            socketio = connected_users[sender_email].get('socketio')
-            if socketio:
-                socketio.emit('friend_connection', notification_data, room=connected_users[sender_email].get('sid'))
-                logger.info(f"Friend connection notification sent to {sender_email}")
-        
-        # Notify recipient
-        if recipient_email in connected_users:
-            notification_data = {
-                'event': 'friend_connection_established',
-                'senderEmail': sender_email,
-                'senderCategory': categories_info.get('user1Category'),
-                'recipientCategory': categories_info.get('user2Category'),
-                'timestamp': datetime.now().isoformat(),
-                'message': f"You are now connected with {sender_email} as friends"
-            }
-            
-            socketio = connected_users[recipient_email].get('socketio')
-            if socketio:
-                socketio.emit('friend_connection', notification_data, room=connected_users[recipient_email].get('sid'))
-                logger.info(f"Friend connection notification sent to {recipient_email}")
-    
-    except Exception as e:
-        logger.error(f"Error sending friend connection notification: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc()) 
+    return {'status': 'unknown', 'lastSeen': None} 
