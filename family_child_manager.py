@@ -378,8 +378,12 @@ def add_child_with_subtree(
             # Find child's node in their family tree
             child_node = None
             original_child_generation = 0  # Default if not set
+            
+            # Look for the child by email first
+            logger.info(f"Looking for child node with email: {child_email} in child's family tree")
             for member in child_family_members:
                 if member.get('email') == child_email:
+                    logger.info(f"Found child node by email with ID: {member.get('id')}")
                     child_node = member
                     # Keep the original ID
                     child_node_id = member.get('id')
@@ -393,6 +397,57 @@ def add_child_with_subtree(
                     member['birthOrder'] = child_birth_order
                     break
             
+            # If we didn't find the child by email, try to find the self-marked node
+            if not child_node:
+                logger.info("Child not found by email, looking for node marked as 'self'")
+                for member in child_family_members:
+                    if member.get('isSelf') == True:
+                        logger.info(f"Found child node marked as 'self' with ID: {member.get('id')}")
+                        child_node = member
+                        # Keep the original ID
+                        child_node_id = member.get('id')
+                        # Get original generation for calculating generation difference
+                        original_child_generation = member.get('generation', 0)
+                        # Update parent ID to point to father
+                        member['parentId'] = father_node_id
+                        # Update generation to be father's generation + 1
+                        member['generation'] = child_generation
+                        # Add birth order
+                        member['birthOrder'] = child_birth_order
+                        # Ensure email is set correctly
+                        member['email'] = child_email
+                        break
+                        
+            # If still not found, try to find the root node or central node
+            if not child_node:
+                logger.info("Child not found by email or self flag, looking for root/central node")
+                
+                # Try to find a node without a parentId that might be the root
+                for member in child_family_members:
+                    if not member.get('parentId'):
+                        # This might be the root node - especially if others have this as their parent
+                        child_count = 0
+                        for other in child_family_members:
+                            if other.get('parentId') == member.get('id'):
+                                child_count += 1
+                                
+                        if child_count > 0:
+                            logger.info(f"Found potential root node with ID: {member.get('id')} with {child_count} children")
+                            child_node = member
+                            # Keep the original ID
+                            child_node_id = member.get('id')
+                            # Get original generation for calculating generation difference
+                            original_child_generation = member.get('generation', 0)
+                            # Update parent ID to point to father
+                            member['parentId'] = father_node_id
+                            # Update generation to be father's generation + 1
+                            member['generation'] = child_generation
+                            # Add birth order
+                            member['birthOrder'] = child_birth_order
+                            # Ensure email is set correctly
+                            member['email'] = child_email
+                            break
+            
             logger.info(f"Found child's original generation: {original_child_generation}")
             
             # Calculate generation difference to adjust descendants
@@ -401,7 +456,7 @@ def add_child_with_subtree(
             
             # If child node not found in their family tree, create it
             if not child_node:
-                logger.info("Child node not found in their family tree - creating new node")
+                logger.warning("Child node not found in their family tree - creating new node")
                 child_node = {
                     'id': child_node_id,
                     'name': child_full_name,
@@ -411,6 +466,7 @@ def add_child_with_subtree(
                     'birthOrder': child_birth_order,
                     'parentId': father_node_id,
                     'userProfileExists': True,
+                    'isSelf': True,  # Mark as self for future reference
                     'generation': child_generation  # Add generation information
                 }
                 
@@ -441,54 +497,148 @@ def add_child_with_subtree(
             
             # Function to recursively collect child's descendants and adjust generations
             def collect_descendants(member_id, members_dict, generation_adjustment):
-                descendants = []
-                # Find direct children
-                children = [m for m in members_dict.values() if m.get('parentId') == member_id]
-                logger.info(f"Found {len(children)} direct children for member {member_id}")
+                """
+                Recursively collect all descendants of a member including spouse, children, and their descendants.
                 
-                # Adjust generations for children and add them to descendants
-                for child in children:
-                    # Adjust generation if it exists
-                    if 'generation' in child:
-                        child['generation'] = child['generation'] - generation_adjustment
-                    else:
-                        # If generation doesn't exist, set it based on parent + 1
-                        parent = members_dict.get(member_id)
-                        if parent and 'generation' in parent:
-                            child['generation'] = parent['generation'] + 1
-                        else:
-                            # Fallback: use child_generation + 1 if can't detrmine
-                            child['generation'] = child_generation + 1
+                Args:
+                    member_id: ID of the member to collect descendants for
+                    members_dict: Dictionary of all family members keyed by ID
+                    generation_adjustment: Value to adjust generations by
                     
-                    descendants.append(child)
-                
-                # Find spouse (generation stays the same as the member)
+                Returns:
+                    List of descendant members with adjusted generations
+                """
+                logger.info(f"Collecting descendants for member_id: {member_id}")
+                descendants = []
                 member = members_dict.get(member_id)
+                if not member:
+                    logger.warning(f"Member {member_id} not found in members_dict")
+                    return []
+                    
+                # Find member's spouse
+                spouse = None
                 spouse_id = member.get('spouse')
+                
+                # First try to find spouse through direct reference
                 if spouse_id and spouse_id in members_dict:
+                    logger.info(f"Found spouse {spouse_id} through direct reference")
                     spouse = members_dict[spouse_id]
+                    spouse = spouse.copy()  # Create copy to avoid modifying original
+                    
                     # Set spouse generation same as member
                     if 'generation' in member:
                         spouse['generation'] = member['generation']
+                    
                     descendants.append(spouse)
-                    logger.info(f"Added spouse {spouse_id} to descendants")
+                else:
+                    # Try to find spouse through alternative means - same generation and opposite gender
+                    member_gender = member.get('gender', '').lower() if member.get('gender') else None
+                    member_gen = member.get('generation', 0)
+                    
+                    logger.info(f"Looking for implicit spouse for {member_id} (gender: {member_gender}, gen: {member_gen})")
+                    
+                    for potential_id, potential_spouse in members_dict.items():
+                        if potential_id == member_id:
+                            continue  # Skip the member itself
+                        
+                        potential_gen = potential_spouse.get('generation', 0)
+                        potential_gender = potential_spouse.get('gender', '').lower() if potential_spouse.get('gender') else None
+                        
+                        # Consider as spouse if:
+                        # 1. Same generation and opposite gender, or
+                        # 2. Has a parentId that matches member's parentId (siblings)
+                        if ((potential_gen == member_gen) and 
+                            (member_gender and potential_gender) and
+                            (member_gender != potential_gender)):
+                            
+                            logger.info(f"Found implicit spouse {potential_id} with opposite gender and same generation")
+                            spouse = potential_spouse.copy()  # Create a copy
+                            spouse['generation'] = member['generation']  # Ensure same generation
+                            descendants.append(spouse)
+                            break
                 
-                # Recursively find descendants of children
+                # Find all direct children - multiple approaches
+                children = []
+                
+                # Method 1: Using parentId field
+                direct_children = [m.copy() for m in members_dict.values() 
+                                 if m.get('parentId') == member_id]
+                
+                if direct_children:
+                    logger.info(f"Found {len(direct_children)} children using parentId reference")
+                    children.extend(direct_children)
+                
+                # Method 2: Check generation compared to member
+                if not children:
+                    member_gen = member.get('generation', 0)
+                    potential_children = []
+                    
+                    # Look for nodes that are one generation lower
+                    for potential_id, potential_child in members_dict.items():
+                        potential_gen = potential_child.get('generation', None)
+                        
+                        # Skip if:
+                        # - It's the same as the current member
+                        # - It's the spouse we just found
+                        # - It already has a different parentId
+                        if (potential_id == member_id or 
+                            (spouse and potential_id == spouse.get('id')) or
+                            (potential_child.get('parentId') and potential_child.get('parentId') != member_id)):
+                            continue
+                        
+                        # Consider as child if one generation below
+                        if potential_gen is not None and potential_gen == member_gen - 1:
+                            logger.info(f"Found potential child {potential_id} by generation comparison")
+                            child = potential_child.copy()
+                            child['parentId'] = member_id  # Ensure proper parent linkage
+                            potential_children.append(child)
+                    
+                    children.extend(potential_children)
+                
+                logger.info(f"Found total of {len(children)} children for member {member_id}")
+                
+                # Adjust generations for children
                 for child in children:
+                    # Adjust generation
+                    if 'generation' in child:
+                        original_gen = child['generation']
+                        child['generation'] = child['generation'] + generation_adjustment
+                        logger.info(f"Adjusted child {child.get('id')} generation from {original_gen} to {child['generation']}")
+                    else:
+                        # If generation doesn't exist, set it based on parent - 1
+                        child['generation'] = member['generation'] - 1
+                    
+                    descendants.append(child)
+                    
+                    # Recursively process this child's descendants
                     child_descendants = collect_descendants(child.get('id'), members_dict, generation_adjustment)
-                    descendants.extend(child_descendants)
+                    if child_descendants:
+                        logger.info(f"Adding {len(child_descendants)} descendants from child {child.get('id')}")
+                        descendants.extend(child_descendants)
                 
                 return descendants
             
             # Create a dictionary of child's family members for easy lookup
-            child_members_dict = {member.get('id'): member for member in child_family_members}
+            child_members_dict = {member.get('id'): member for member in child_family_members if member.get('id')}
+            
+            # Log child members dict for debugging
+            logger.info(f"Created members dictionary with {len(child_members_dict)} entries")
+            for member_id, member in child_members_dict.items():
+                logger.info(f"Member ID: {member_id}, Name: {member.get('name')}, Gen: {member.get('generation')}, Email: {member.get('email')}")
+                if member.get('parentId'):
+                    logger.info(f"  - Has parentId: {member.get('parentId')}")
+                if member.get('spouse'):
+                    logger.info(f"  - Has spouse: {member.get('spouse')}")
             
             # Collect the child's subtree (the child, spouse, and all descendants)
             subtree_to_merge = [child_node]
-            if child_node_id:
+            if child_node_id and child_node_id in child_members_dict:
+                logger.info(f"Starting collection of descendants for child node: {child_node_id}")
                 descendants = collect_descendants(child_node_id, child_members_dict, generation_diff)
                 subtree_to_merge.extend(descendants)
                 logger.info(f"Collected {len(descendants)} descendants for child's subtree")
+            else:
+                logger.warning(f"Child node ID ({child_node_id}) not found in members dictionary, cannot collect descendants")
             
             # Add only the child's subtree to the father's family tree
             updated_family_members = father_family_members.copy()
