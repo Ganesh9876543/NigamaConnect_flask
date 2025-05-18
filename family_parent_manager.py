@@ -281,6 +281,7 @@ def create_family_tree_with_parents(
             'gender': child_profile.get('GENDER', '').lower(),
             'email': child_email,
             'phone': child_profile.get('phone', ''),
+            'isSelf': True,
             'userProfileExists': True,
             'generation': child_generation  # Child generation is based on parent's generation
         }
@@ -537,6 +538,7 @@ def merge_family_trees(
             'name': father_full_name,
             'gender': 'male',
             'email': father_email,
+            'isSelf': False,
             'phone': father_profile.get('phone', ''),
             'userProfileExists': True,
             'nodeType': 'father'
@@ -620,6 +622,7 @@ def merge_family_trees(
                 'name': child_full_name,
                 'gender': child_profile.get('GENDER', '').lower(),
                 'email': child_email,
+                'isSelf': True,
                 'phone': child_profile.get('phone', ''),
                 'userProfileExists': True,
                 'generation': father_generation - 1,  # One generation below father
