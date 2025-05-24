@@ -2469,6 +2469,18 @@ def send_invitation_api():
         logger.info(f"Received invitation request - Type: {invitation_type}")
         logger.info(f"Additional data: {additional_data}")
         
+        # Get sender's profile information for the notification
+        sender_doc = user_profiles_ref.document(sender_email).get()
+        sender_name = sender_email  # Default to email if name not found
+        sender_avatar = None
+        
+        if sender_doc.exists:
+            sender_data = sender_doc.to_dict()
+            first_name = sender_data.get('firstName', '')
+            last_name = sender_data.get('lastName', '')
+            sender_name = f"{first_name} {last_name}".strip() or sender_email
+            sender_avatar = sender_data.get('profileImage')
+        
         # Send the invitation with the additional data directly
         success, result = send_invitation(
             sender_email=sender_email,
@@ -2480,15 +2492,14 @@ def send_invitation_api():
         )
         
         if success:
-
-               # Create notification for the recipient
+            # Create notification for the recipient
             notification_data = {
                 "userEmail": recipient_email,
                 "type": "invitation",
                 "data": {
                     "invitationType": invitation_type,
                     "senderId": sender_email,
-                    "senderName": sender_name,
+                    "senderName": sender_name,  # Now sender_name is properly defined
                     "senderAvatar": sender_avatar,
                     "message": f"{sender_name} sent you a {invitation_type} invitation",
                     "status": "pending",
