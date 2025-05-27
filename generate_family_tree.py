@@ -222,29 +222,29 @@ def generate_family_tree(family_data):
         graph_attr={
             'rankdir': 'TB',  # Top to bottom direction
             'splines': 'polyline',  # Use polyline for natural connections
-            'bgcolor': 'white:lightgrey',  # Gradient background (white to light grey)
-            'nodesep': '0.75',  # Node separation
-            'ranksep': '1.0',  # Rank separation
+            'bgcolor': '#FFFFFF',  # Pure white background
+            'nodesep': '1.4',  # Further increased node separation
+            'ranksep': '2.0',  # Further increased rank separation
             'fontname': 'Arial',
-            'style': 'rounded,filled',  # Add rounded style to the graph
+            'style': 'rounded',  # Remove filled style from graph
             'color': '#000000',  # Black border color
-            'penwidth': '3.0',  # Thicker border
+            'penwidth': '2.0',  # Thinner border for cleaner look
         },
         node_attr={
             'shape': 'box',
             'style': 'filled,rounded',
             'fillcolor': 'white',
             'fontcolor': 'black',  # Black text for all nodes
-            'penwidth': '2.0',
-            'fontsize': '14',
+            'penwidth': '1.5',  # Thinner borders for nodes
+            'fontsize': '22',  # Base font size
             'fontname': 'Arial',
-            'height': '0.6',
-            'width': '1.6',
-            'margin': '0.2'
+            'height': '1.2',  # Further increased height
+            'width': '2.8',  # Further increased width
+            'margin': '0.5'  # Further increased margin
         },
         edge_attr={
-            'color': '#000000',  # Black color for all edges
-            'penwidth': '3.0'  # Thicker edges
+            'color': '#444444',  # Darker gray color for better visibility
+            'penwidth': '4.0'  # Significantly increased edge thickness
         }
     )
 
@@ -254,32 +254,32 @@ def generate_family_tree(family_data):
         fillcolor = 'white'
         fontcolor = 'black'
         
-        # Special color for "self" node only - black background
+        # Special color for "self" node - blue background
         if member['id'] == self_id:
-            fillcolor = 'black'
-            fontcolor = 'white'  # White text for readability on black background
+            fillcolor = '#00a3ee'  # Requested blue color for self node
+            fontcolor = 'white'  # White text for readability
         
         # Create profile image node
         profile_image_path = create_profile_image_node(member.get('profileImage'), member['id'])
         
-        # Create a stylized label with name, relation, and generation
-        label = f"<<TABLE BORDER='0' CELLBORDER='1' CELLSPACING='0' CELLPADDING='4'>"
+        # Create a stylized label with name and relation only
+        label = f"<<TABLE BORDER='0' CELLBORDER='0' CELLSPACING='0' CELLPADDING='10'>"  # Further increased padding
         if profile_image_path:
             # Convert Windows path to forward slashes for Graphviz
             image_path = profile_image_path.replace('\\\\', '/')
-            label += f"<TR><TD ROWSPAN='2'><IMG SRC='{image_path}' SCALE='TRUE' FIXEDSIZE='TRUE' WIDTH='50' HEIGHT='50'/></TD>"
+            label += f"<TR><TD ROWSPAN='2'><IMG SRC='{image_path}' SCALE='TRUE' FIXEDSIZE='TRUE' WIDTH='90' HEIGHT='90'/></TD>"  # Further increased image size
         else:
-            label += "<TR><TD ROWSPAN='2'>👤</TD>"
+            label += "<TR><TD ROWSPAN='2'><FONT POINT-SIZE='50'>👤</FONT></TD>"  # Increased emoji size
         
-        label += f"<TD ALIGN='LEFT'><B>{member['name']}</B></TD></TR>"
+        # Add name with larger font (40% increase from previous 25)
+        label += f"<TD ALIGN='LEFT'><FONT POINT-SIZE='35'><B>{member['name']}</B></FONT></TD></TR>"
         
-        # Add relation information from the family members data
+        # Add relation information with larger font (40% increase from previous 22)
         if member.get('relation'):
-            label += f"<TR><TD ALIGN='LEFT'>{member['relation']}</TD></TR>"
+            label += f"<TR><TD ALIGN='LEFT'><FONT POINT-SIZE='31'>{member['relation']}</FONT></TD></TR>"
         else:
-            label += f"<TR><TD ALIGN='LEFT'>Relative</TD></TR>"
+            label += f"<TR><TD ALIGN='LEFT'><FONT POINT-SIZE='31'>Relative</FONT></TD></TR>"
             
-        label += f"<TR><TD COLSPAN='2' ALIGN='LEFT'>Gen: {member['generation']}</TD></TR>"
         label += "</TABLE>>"
          
         # Add node with proper styling
@@ -289,7 +289,7 @@ def generate_family_tree(family_data):
             fillcolor=fillcolor, 
             fontcolor=fontcolor,
             style='filled,rounded',
-            penwidth='2.0'
+            penwidth='1.5'  # Thinner border for cleaner look
         )
 
     # Add marriage nodes and connections, ensuring spouses are side by side
@@ -312,18 +312,18 @@ def generate_family_tree(family_data):
                     c.node(spouse_ids[0])  # First spouse
                     c.node(spouse_ids[1])  # Second spouse
 
-                # Create a marriage node with enhanced design
-                dot.node(marriage_id, label="*", shape="circle", width="0.25", height="0.25", 
-                         color="#000000", fontcolor="#000000", fontsize="12", 
-                         style="filled", fillcolor="#FF69B4:#FF1493")
+                # Create a marriage node with more prominent design
+                dot.node(marriage_id, label="•", shape="circle", width="0.5", height="0.5", 
+                         color="#444444", fontcolor="#444444", fontsize="20", 
+                         style="filled", fillcolor="#FFFFFF", penwidth="3.0")
                 
-                # Connect both spouses to the marriage node with solid black edges
-                dot.edge(spouse_ids[0], marriage_id, color="#000000", penwidth="3.0", 
+                # Connect both spouses to the marriage node with much thicker edges
+                dot.edge(spouse_ids[0], marriage_id, color="#444444", penwidth="4.0", 
                          arrowhead="none", style="solid")
-                dot.edge(spouse_ids[1], marriage_id, color="#000000", penwidth="3.0", 
+                dot.edge(spouse_ids[1], marriage_id, color="#444444", penwidth="4.0", 
                          arrowhead="none", style="solid")
 
-    # Connect parents to children with thick black arrows
+    # Connect parents to children with much thicker arrows
     for member in family_data:
         if member.get('parentId'):
             # If parent has a spouse, connect to marriage node
@@ -333,37 +333,13 @@ def generate_family_tree(family_data):
                 spouse_ids = sorted([parent['id'], parent['spouse']])
                 marriage_id = f"marriage_{spouse_ids[0]}_{spouse_ids[1]}"
                 if marriage_id in marriages:
-                    dot.edge(marriage_id, member['id'], color="#000000", penwidth="3.0",
+                    dot.edge(marriage_id, member['id'], color="#444444", penwidth="4.0",
                              style="solid", arrowhead="normal", arrowtail="none", 
-                             arrowsize="1.2", taper="true")
+                             arrowsize="1.5")
             else:
-                dot.edge(member['parentId'], member['id'], color="#000000", penwidth="3.0",
+                dot.edge(member['parentId'], member['id'], color="#444444", penwidth="4.0",
                          style="solid", arrowhead="normal", arrowtail="none", 
-                         arrowsize="1.2", taper="true")
-
-    # Add special symbols for expansion points with enhanced designs
-    for member in family_data:
-        if member.get('canAddWife'):
-            plus_id = f"add_wife_{member['id']}"
-            dot.node(plus_id, label="+", shape="diamond", width="0.3", height="0.3", 
-                     fillcolor="#FFD700:#FFA500", style="filled", fontcolor="#000000", 
-                     tooltip="Add Wife")  # Removed shadow style
-            dot.edge(member['id'], plus_id, style="solid", color="#000000", penwidth="3.0", 
-                     arrowhead="open", arrowsize="0.8")
-            
-        if member.get('canAddChild'):
-            plus_id = f"add_child_{member['id']}"
-            dot.node(plus_id, label="+", shape="circle", width="0.3", height="0.3", 
-                     fillcolor="#FF6347:#FF4500", style="filled", fontcolor="#000000", 
-                     tooltip="Add Child")  # Removed shadow style
-            dot.edge(member['id'], plus_id, style="solid", color="#000000", penwidth="3.0", 
-                     arrowhead="vee", arrowsize="0.8")
-                
- 
-    # Add a title with a decorative border
-    dot.attr(label=r'\nFamily Tree\n', fontsize="24", fontname="Arial Bold", 
-             labelloc="t", labeljust="c", 
-             style="filled", fillcolor="#F0F8FF", color="#000000", penwidth="3.0")
+                         arrowsize="1.5")
 
     # Render the graph to PNG
     temp_dir = tempfile.gettempdir()
