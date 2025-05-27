@@ -1,3 +1,10 @@
+import tempfile
+import os
+import base64
+import io
+from graphviz import Digraph
+from PIL import Image, ImageDraw
+
 def generate_relatives_tree(relatives_data):
     """
     Generate a tree visualization for relatives data
@@ -8,23 +15,14 @@ def generate_relatives_tree(relatives_data):
     Returns:
         str: Base64 encoded image of the relatives tree
     """
-    import tempfile
-    import os
-    import base64
-    import io
-    from graphviz import Digraph
-    from PIL import Image, ImageDraw
-
-    # Convert dictionary to list of relatives
+    # Convert dictionary to list of relatives if needed
     if isinstance(relatives_data, dict):
         relatives_list = []
         for id, person in relatives_data.items():
-            # Make sure id is included in person data
             person_data = dict(person)
             person_data['id'] = id
             relatives_list.append(person_data)
     else:
-        # If it's already a list, use as is
         relatives_list = relatives_data
     
     # Find the self person
@@ -42,33 +40,32 @@ def generate_relatives_tree(relatives_data):
         graph_attr={
             'rankdir': 'TB',  # Top to bottom direction
             'splines': 'polyline',  # Use polyline for natural connections
-            'bgcolor': 'white:lightgrey',  # Gradient background (white to light grey)
-            'nodesep': '0.75',  # Node separation
-            'ranksep': '1.0',  # Rank separation
+            'bgcolor': '#FFFFFF',  # Pure white background
+            'nodesep': '1.4',  # Further increased node separation
+            'ranksep': '2.0',  # Further increased rank separation
             'fontname': 'Arial',
-            'style': 'rounded,filled',  # Add rounded style to the graph
+            'style': 'rounded',  # Remove filled style from graph
             'color': '#000000',  # Black border color
-            'penwidth': '3.0',  # Thicker border
+            'penwidth': '2.0',  # Thinner border for cleaner look
         },
         node_attr={
             'shape': 'box',
             'style': 'filled,rounded',
             'fillcolor': 'white',
             'fontcolor': 'black',  # Black text for all nodes
-            'penwidth': '2.0',
-            'fontsize': '14',
+            'penwidth': '1.5',  # Thinner borders for nodes
+            'fontsize': '22',  # Base font size
             'fontname': 'Arial',
-            'height': '0.6',
-            'width': '1.6',
-            'margin': '0.2'
+            'height': '1.2',  # Further increased height
+            'width': '2.8',  # Further increased width
+            'margin': '0.5'  # Further increased margin
         },
         edge_attr={
-            'color': '#000000',  # Black color for all edges
-            'penwidth': '3.0'  # Thicker edges
+            'color': '#444444',  # Darker gray color for better visibility
+            'penwidth': '4.0'  # Significantly increased edge thickness
         }
     )
 
-    # Create profile image node function
     def create_profile_image_node(profile_image, member_id):
         """Create a temporary profile image file from URL, base64 data, or use default icon."""
         temp_dir = tempfile.gettempdir()
@@ -77,25 +74,16 @@ def generate_relatives_tree(relatives_data):
         try:
             if profile_image and isinstance(profile_image, str):
                 if profile_image.startswith('data:image/'):
-                    # Handle base64 encoded image
                     try:
-                        # Split the base64 data from the metadata
                         header, encoded = profile_image.split(',', 1)
-                        # Decode the base64 data
                         img_data = base64.b64decode(encoded)
-                        # Open image from decoded data
                         img = Image.open(io.BytesIO(img_data))
-                        # Resize to standardize dimensions
                         img = img.resize((100, 100))
-                        # Save as image file
                         img.save(image_path, 'PNG')
                         return image_path
                     except Exception as e:
                         print(f"Error processing base64 image: {e}")
-                        # Fall back to default image
                 elif profile_image.startswith('http'):
-                    # For URLs, we'll create a default image for this example
-                    # In a real implementation, you'd download the image
                     img = Image.new('RGBA', (100, 100), (255, 255, 255, 0))
                     draw = ImageDraw.Draw(img)
                     draw.ellipse([25, 25, 75, 75], fill=(204, 204, 204, 255))
@@ -122,35 +110,31 @@ def generate_relatives_tree(relatives_data):
         fillcolor = 'white'
         fontcolor = 'black'
         
-        # Special color for "self" node only - black background
+        # Special color for "self" node - blue background
         if member.get('isSelf') == True:
-            fillcolor = 'black'
-            fontcolor = 'white'  # White text for readability on black background
+            fillcolor = '#00a3ee'  # Requested blue color for self node
+            fontcolor = 'white'  # White text for readability
         
         # Create profile image node
         profile_image_path = create_profile_image_node(member.get('profileImage'), member['id'])
         
-        # Create a stylized label with name, relation, and generation
-        label = f"<<TABLE BORDER='0' CELLBORDER='1' CELLSPACING='0' CELLPADDING='4'>"
+        # Create a stylized label with name and relation only
+        label = f"<<TABLE BORDER='0' CELLBORDER='0' CELLSPACING='0' CELLPADDING='10'>"  # Further increased padding
         if profile_image_path:
             # Convert Windows path to forward slashes for Graphviz
             image_path = profile_image_path.replace('\\', '/').replace('//', '/')
-            # Remove problematic attributes and use only SCALE
-            label += f"<TR><TD ROWSPAN='2'><IMG SRC='{image_path}' SCALE='TRUE'/></TD>"
+            label += f"<TR><TD ROWSPAN='2'><IMG SRC='{image_path}' SCALE='TRUE' FIXEDSIZE='TRUE' WIDTH='90' HEIGHT='90'/></TD>"  # Further increased image size
         else:
-            label += "<TR><TD ROWSPAN='2'>👤</TD>"
+            label += "<TR><TD ROWSPAN='2'><FONT POINT-SIZE='50'>👤</FONT></TD>"  # Increased emoji size
         
-        # Add name information
+        # Add name with larger font
         full_name = member.get('name', '')
-        label += f"<TD ALIGN='LEFT'><B>{full_name}</B></TD></TR>"
+        label += f"<TD ALIGN='LEFT'><FONT POINT-SIZE='35'><B>{full_name}</B></FONT></TD></TR>"
         
-        # Add relation information
+        # Add relation information with larger font
         relation = member.get('relation', 'Relative')
-        label += f"<TR><TD ALIGN='LEFT'>{relation}</TD></TR>"
-            
-        # Add generation information
-        generation = member.get('generation', 'N/A')
-        label += f"<TR><TD COLSPAN='2' ALIGN='LEFT'>Gen: {generation}</TD></TR>"
+        label += f"<TR><TD ALIGN='LEFT'><FONT POINT-SIZE='31'>{relation}</FONT></TD></TR>"
+        
         label += "</TABLE>>"
         
         # Add node with proper styling
@@ -160,7 +144,7 @@ def generate_relatives_tree(relatives_data):
             fillcolor=fillcolor, 
             fontcolor=fontcolor,
             style='filled,rounded',
-            penwidth='2.0'
+            penwidth='1.5'  # Thinner border for cleaner look
         )
 
     # Add marriage nodes and connections, ensuring spouses are side by side
@@ -183,18 +167,18 @@ def generate_relatives_tree(relatives_data):
                     c.node(spouse_ids[0])  # First spouse
                     c.node(spouse_ids[1])  # Second spouse
 
-                # Create a marriage node with enhanced design
-                dot.node(marriage_id, label="*", shape="circle", width="0.25", height="0.25", 
-                         color="#000000", fontcolor="#000000", fontsize="12", 
-                         style="filled", fillcolor="#FF69B4:#FF1493")
+                # Create a marriage node with subtle design
+                dot.node(marriage_id, label="•", shape="circle", width="0.25", height="0.25", 
+                         color="#444444", fontcolor="#444444", fontsize="16", 
+                         style="filled", fillcolor="#FFFFFF")
                 
-                # Connect both spouses to the marriage node with solid black edges
-                dot.edge(spouse_ids[0], marriage_id, color="#000000", penwidth="3.0", 
+                # Connect both spouses to the marriage node with subtle edges
+                dot.edge(spouse_ids[0], marriage_id, color="#444444", penwidth="4.0", 
                          arrowhead="none", style="solid")
-                dot.edge(spouse_ids[1], marriage_id, color="#000000", penwidth="3.0", 
+                dot.edge(spouse_ids[1], marriage_id, color="#444444", penwidth="4.0", 
                          arrowhead="none", style="solid")
 
-    # Connect parents to children with thick black arrows
+    # Connect parents to children with subtle arrows
     for member in relatives_list:
         if member.get('parentId'):
             # If parent has a spouse, connect to marriage node
@@ -204,13 +188,13 @@ def generate_relatives_tree(relatives_data):
                 spouse_ids = sorted([str(parent['id']), str(parent['spouse'])])
                 marriage_id = f"marriage_{spouse_ids[0]}_{spouse_ids[1]}"
                 if marriage_id in marriages:
-                    dot.edge(marriage_id, str(member['id']), color="#000000", penwidth="3.0",
+                    dot.edge(marriage_id, str(member['id']), color="#444444", penwidth="4.0",
                              style="solid", arrowhead="normal", arrowtail="none", 
-                             arrowsize="1.2", taper="true")
+                             arrowsize="1.5")
             else:
-                dot.edge(str(member['parentId']), str(member['id']), color="#000000", penwidth="3.0",
+                dot.edge(str(member['parentId']), str(member['id']), color="#444444", penwidth="4.0",
                          style="solid", arrowhead="normal", arrowtail="none", 
-                         arrowsize="1.2", taper="true")
+                         arrowsize="1.5")
 
     # Group nodes by generation for better layout
     generations = {}
@@ -226,11 +210,6 @@ def generate_relatives_tree(relatives_data):
             c.attr(rank='same')
             for member_id in members:
                 c.node(member_id)
-
-    # Add a title with a decorative border
-    dot.attr(label=r'\nRelatives Tree\n', fontsize="24", fontname="Arial Bold", 
-             labelloc="t", labeljust="c", 
-             style="filled", fillcolor="#F0F8FF", color="#000000", penwidth="3.0")
 
     # Render the graph to PNG
     temp_dir = tempfile.gettempdir()
