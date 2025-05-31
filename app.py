@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 import random
 import smtplib
 from email.mime.text import MIMEText
@@ -6,10 +6,10 @@ from email.mime.multipart import MIMEMultipart
 import time
 from flask_cors import CORS  # Import CORS
 from flask import Flask, request, jsonify
-from firebase_admin import credentials, firestore, initialize_app
+from firebase_admin import firestore
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from flask_cors import CORS
 import logging
 from werkzeug.utils import secure_filename
@@ -34,23 +34,17 @@ from invitation_manager import (
 from socket_manager import init_socketio, notify_user
 from family_child_manager import add_child_to_family_tree, create_family_tree_with_father_child, add_child_with_subtree
 from family_parent_manager import add_parents_to_family_tree, create_family_tree_with_parents, merge_family_trees
-
-
-from flask import Flask, request, jsonify
-from firebase_admin import credentials, initialize_app, firestore
-from datetime import datetime
-import uuid
-import os
-import logging
-from werkzeug.utils import secure_filename
+from notification_manager import get_user_notifications, mark_notifications_read, archive_notifications, mark_all_notifications_read
+from firebase_init import get_firestore_client
 
 # Import the new friend manager module
 from friend_manager import add_noprofile_friend
 
 from promocode_manager import add_promocode, get_promocode_details, update_tree_node_with_promocode
 
-from notification_manager import get_user_notifications, mark_notifications_read, archive_notifications, mark_all_notifications_read
-
+import base64
+import mimetypes
+import threading
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -72,7 +66,7 @@ logger = logging.getLogger(__name__)
 SMTP_SERVER = 'smtp.gmail.com'
 SMTP_PORT = 587  # Use 465 for SSL
 EMAIL_ADDRESS = 'missionimpossible4546@gmail.com'
-EMAIL_PASSWORD = 'yuiugahripwqnbme'
+EMAIL_PASSWORD = 'yuiugahripwqnbme' 
 
 def send_email(to_email, subject, body):
     # Create a MIMEMultipart message
@@ -134,7 +128,7 @@ def send_otp():
         
         <div style="background-color: #e8f4ff; padding: 15px; border-radius: 6px; margin: 20px 0; text-align: center; border: 1px dashed #007bff;">
             <p style="margin: 0; font-size: 16px;">To ensure your account security, please verify with the One-Time Password below:</p>
-            <h1 style="color: #007bff; font-size: 32px; letter-spacing: 5px; margin: 15px 0;">{otp}</h1>
+            <h1 style="color: #007bff; font-size: 42px; letter-spacing: 5px; margin: 15px 0;">{otp}</h1>
             <p style="margin: 0; font-style: italic; color: #666;">This OTP is valid for the next 10 minutes only</p>
         </div>
         
@@ -211,23 +205,24 @@ def cleanup_expired_otps():
 # You could call this function periodically, or implement a scheduled task
 
 
-
 # try:
-#     # Get service account key JSON from environment variable
-#     firebase_config = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
+#     # Use the secret file path in Render's secret directory
+#     secret_file_path = '/etc/secrets/firebase_service_account.json'
 
-#     if firebase_config:
-#         # Parse the JSON string from environment variable
-#         service_account_info = json.loads(firebase_config)
-#         cred = credentials.Certificate(service_account_info)
-#         firebase_app = firebase_admin.initialize_app(cred)
+#     # Verify if the secret file exists
+#     if os.path.exists(secret_file_path):
+#         cred = credentials.Certificate(secret_file_path)
+#         firebase_app = initialize_app(cred)
 #         db = firestore.client()
 #         user_profiles_ref = db.collection('user_profiles')
+#         family_tree_ref = db.collection('family_tree')  # Top-level collection
 #         logger.info("Firebase initialized successfully")
 #     else:
-#         raise ValueError("FIREBASE_SERVICE_ACCOUNT environment variable not set")
+#         raise FileNotFoundError(f"Secret file not found at: {secret_file_path}")
 # except Exception as e:
 #     logger.error(f"Error initializing Firebase: {e}")
+
+#     # Handle development mode scenario
 #     if os.environ.get('FLASK_ENV') == 'development':
 #         logger.warning("Running in development mode without Firebase")
 #         firebase_app = None
@@ -238,28 +233,17 @@ def cleanup_expired_otps():
 
 
 try:
-    # Use the secret file path in Render's secret directory
-    secret_file_path = '/etc/secrets/firebase_service_account.json'
-
-    # Verify if the secret file exists
-    if os.path.exists(secret_file_path):
-        cred = credentials.Certificate(secret_file_path)
-        firebase_app = initialize_app(cred)
-        db = firestore.client()
-        user_profiles_ref = db.collection('user_profiles')
-        family_tree_ref = db.collection('family_tree')  # Top-level collection
-        logger.info("Firebase initialized successfully")
-    else:
-        raise FileNotFoundError(f"Secret file not found at: {secret_file_path}")
+    db = get_firestore_client()
+    user_profiles_ref = db.collection('user_profiles')  # Ensure this line is executed
+    family_tree_ref = db.collection('family_tree')  # Top-level collection
+    logger.info("Firebase initialized successfully")
 except Exception as e:
     logger.error(f"Error initializing Firebase: {e}")
-
-    # Handle development mode scenario
     if os.environ.get('FLASK_ENV') == 'development':
         logger.warning("Running in development mode without Firebase")
-        firebase_app = None
         db = None
-        user_profiles_ref = None
+        user_profiles_ref = None  # Ensure this is set to None if Firebase fails
+        family_tree_ref = None
     else:
         raise
 
@@ -2307,7 +2291,7 @@ def get_member_relatives_tree():
         # Validate required parameters
         if not all([family_tree_id, node_id]):
             return jsonify({
-                'success': False,
+                'success': False,  
                 'message': 'Missing required parameters: family_tree_id, node_id, and email are required'
             }), 400
         print("hi1")
@@ -2819,90 +2803,6 @@ def notify_about_invitation():
             "success": False,
             "message": str(e)
         }), 500
-
-# @app.route('/api/family-tree/add-child', methods=['POST'])
-# def add_child():
-#     """
-#     API endpoint to add a child to a parent in the family tree.
-#     Takes child node data, father's node ID, and family tree ID.
-#     Adds the child to the family tree with the father as the parent.
-#     """
-#     try:
-#         data = request.json
-#         child_data = data.get('childNode')
-#         father_node_id = data.get('fatherNodeId')
-#         family_tree_id = data.get('familyTreeId')
-
-#         if not child_data or not father_node_id or not family_tree_id:
-#             return jsonify({
-#                 "success": False,
-#                 "error": "Child data, father node ID, and family tree ID are required"
-#             }), 400
-
-#         logger.info(f"Received request to add child to father ID {father_node_id} in family tree {family_tree_id}")
-
-#         # Get the family tree document
-#         family_tree_doc = db.collection('family_tree').document(family_tree_id).get()
-        
-#         if not family_tree_doc.exists:
-#             return jsonify({
-#                 "success": False,
-#                 "message": f"Family tree not found: {family_tree_id}"
-#             }), 404
-
-#         family_tree = family_tree_doc.to_dict()
-#         family_members = family_tree.get('familyMembers', [])
-        
-#         # Check if father exists in the family tree
-#         father_exists = False
-#         for member in family_members:
-#             if member.get('id') == father_node_id:
-#                 father_exists = True
-#                 break
-                
-#         if not father_exists:
-#             return jsonify({
-#                 "success": False,
-#                 "message": f"Father node with ID {father_node_id} not found in the family tree"
-#             }), 404
-            
-#         # Add parentId to the child data
-#         child_data['parentId'] = father_node_id
-        
-#         # If the child doesn't have an ID, generate one
-#         if 'id' not in child_data:
-#             child_data['id'] = str(uuid.uuid4())
-            
-#         # Add the child to the family members list
-#         family_members.append(child_data)
-        
-#         # Update the family tree document
-#         db.collection('family_tree').document(family_tree_id).update({
-#             'familyMembers': family_members,
-#             'updatedAt': datetime.now().isoformat()
-#         })
-        
-#         # If the child has an email, update their profile with the family tree ID
-#         child_email = child_data.get('email')
-#         if child_email:
-#             user_profiles_ref.document(child_email).set({
-#                 'familyTreeId': family_tree_id,
-#                 'updatedAt': datetime.now().isoformat()
-#             }, merge=True)
-
-#         return jsonify({
-#             "success": True,
-#             "message": "Child added successfully to the family tree",
-#             "familyTreeId": family_tree_id,
-#             "childNodeId": child_data['id']
-#         })
-
-#     except Exception as e:
-#         logger.error(f"Error adding child to family tree: {e}")
-#         return jsonify({
-#             "success": False,
-#             "error": str(e)
-#         }), 500
 
 @app.route('/api/family-tree/add-child', methods=['POST'])
 def add_child_api():
@@ -4004,7 +3904,7 @@ def get_promocode_api():
     except Exception as e:
         logger.error(f"Error in get_promocode_api: {e}")
         return jsonify({
-            "success": False,
+            "success": False, 
             "error": str(e)
         }), 500
 
@@ -4061,7 +3961,7 @@ def update_tree_with_promocode():
                 "success": False,
                 "error": f"Missing required fields: {', '.join(missing_fields)}"
             }), 400
-        
+         
         logger.info(f"Validation successful, processing request")
         
         # Call the function from promocode_manager.py
@@ -4093,7 +3993,6 @@ def update_tree_with_promocode():
             "success": False,
             "error": str(e)
         }), 500
-
 
 @app.route('/api/notifications/create', methods=['POST'])
 def create_notification():
@@ -4172,7 +4071,10 @@ def create_notification():
             'unreadCount': unread_count
         }
 
-        # Attempt to send real-time notification via Socket.IO
+        # Send notifications (both Socket.IO and Push) in parallel
+        notification_sent = False
+        
+        # 1. Attempt to send real-time notification via Socket.IO
         try:
             # Emit to the user's personal notification channel
             socketio.emit(
@@ -4183,10 +4085,9 @@ def create_notification():
                     'unreadCount': unread_count
                 }
             )
-            logger.info(f"Emitted real-time notification event to channel notification_{user_email}")
+            logger.info(f"✅ Socket.IO: Sent to personal channel notification_{user_email}")
             
-            # Also emit to a general notification channel with the user's email
-            # This allows client-side code to listen to a general channel and filter by email
+            # Also emit to a general notification channel
             socketio.emit(
                 'notifications', 
                 {
@@ -4196,14 +4097,17 @@ def create_notification():
                     'unreadCount': unread_count
                 }
             )
-            logger.info(f"Emitted notification update to general notifications channel")
+            logger.info("✅ Socket.IO: Sent to general channel")
+            notification_sent = True
             
         except Exception as socket_error:
-            logger.warning(f"Failed to send real-time notification: {str(socket_error)}")
+            logger.error(f"❌ Socket.IO: Failed to send notification: {str(socket_error)}")
         
-        # Attempt to send push notification to user's devices
+        # 2. Send push notification
         try:
-            # Create appropriate notification title and body based on type
+            from push_notification_service import send_push_notification_to_user
+            
+            # Prepare push notification content
             push_title = "Nigama Connect"
             push_body = "You have a new notification"
             
@@ -4233,30 +4137,42 @@ def create_notification():
                 push_title = f"New {category} Listing"
                 push_body = f"{title}"
             
-            # Send push notification
-            push_success, push_result = send_push_notification(
+            # Send push notification directly using the service
+            push_success, push_result = send_push_notification_to_user(
+                db=db,
                 user_email=user_email,
                 title=push_title,
                 body=push_body,
                 data={
                     'notificationId': notification['_id'],
                     'type': notification_type,
-                    'createdAt': notification['createdAt']
+                    'createdAt': notification['createdAt'],
+                    'data': notification_data
                 }
             )
             
             if push_success:
-                logger.info(f"Push notification sent successfully: {push_result.get('message')}")
+                logger.info(f"✅ Push: Notification sent successfully - {push_result.get('message')}")
+                notification_sent = True
             else:
-                logger.warning(f"Failed to send push notification: {push_result.get('error')}")
+                logger.warning(f"❌ Push: Failed to send notification - {push_result.get('error')}")
             
         except Exception as push_error:
-            logger.warning(f"Error sending push notification: {str(push_error)}")
+            logger.error(f"❌ Push: Error sending notification - {str(push_error)}")
+        
+        # Add delivery status to response
+        response_data['notification_delivery'] = {
+            'success': notification_sent,
+            'methods': {
+                'socket': notification_sent,
+                'push': push_success if 'push_success' in locals() else False
+            }
+        }
         
         logger.info(f"====== CREATE NOTIFICATION REQUEST END ======")
         return jsonify({
             'success': True,
-            'message': 'Notification created successfully',
+            'message': 'Notification created and delivered successfully' if notification_sent else 'Notification created but delivery partially failed',
             'data': response_data
         })
 
@@ -4834,48 +4750,44 @@ def send_push_notification(user_email, title, body, data=None):
             - result (dict): Contains count of notifications sent or error message
     """
     try:
-        # Default data object if none provided
-        if data is None:
-            data = {}
+        logger.info(f"====== PUSH NOTIFICATION HANDLER START ======")
+        logger.info(f"Initiating push notification for user: {user_email}")
+        logger.info(f"Notification Content:")
+        logger.info(f"- Title: {title}")
+        logger.info(f"- Body: {body}")
+        logger.info(f"- Additional Data: {json.dumps(data, indent=2) if data else 'None'}")
+
+        from push_notification_service import send_push_notification_to_user
         
-        # Get reference to user's device tokens collection
-        user_ref = db.collection('user_profiles').document(user_email)
-        device_tokens_ref = user_ref.collection('device_tokens')
+        # Send push notification using the service
+        logger.info("Delegating to push notification service...")
+        success, result = send_push_notification_to_user(
+            db=db,
+            user_email=user_email,
+            title=title,
+            body=body,
+            data=data
+        )
         
-        # Get all device tokens for the user
-        device_docs = device_tokens_ref.get()
-        device_tokens = [doc.to_dict().get('token') for doc in device_docs if doc.exists]
-        
-        if not device_tokens:
-            logger.info(f"No registered devices found for user: {user_email}")
-            return True, {"message": "No registered devices found", "count": 0}
-        
-        # Prepare notification payload (this would need to be adapted based on your push notification service)
-        # This is a placeholder - you would need to implement the actual sending logic
-        notification = {
-            "to": device_tokens,
-            "title": title,
-            "body": body,
-            "data": data
-        }
-        
-        logger.info(f"Sending push notification to {len(device_tokens)} devices for user {user_email}")
-        logger.info(f"Notification: {title} - {body}")
-        
-        # TODO: Implement the actual push notification sending logic
-        # This would typically involve making an API call to a service like Firebase Cloud Messaging,
-        # Expo Push Notifications API, or similar service
-        
-        # For now, we'll just log it and return success
-        logger.info(f"Push notification would be sent to devices: {device_tokens}")
-        
-        return True, {
-            "message": f"Push notification sent to {len(device_tokens)} devices",
-            "count": len(device_tokens)
-        }
+        if success:
+            logger.info(f"✅ Push notification processed successfully")
+            logger.info(f"Result: {result.get('message')}")
+            if 'result' in result:
+                details = result['result']
+                logger.info(f"Detailed Results:")
+                logger.info(f"- Successful sends: {details.get('successful_sends', 0)}")
+                logger.info(f"- Failed sends: {details.get('failed_sends', 0)}")
+                logger.info(f"- Total devices: {details.get('total_devices', 0)}")
+        else:
+            logger.warning(f"❌ Push notification processing failed")
+            logger.warning(f"Error: {result.get('message', 'Unknown error')}")
+            
+        logger.info(f"====== PUSH NOTIFICATION HANDLER END ======")
+        return success, result
         
     except Exception as e:
-        logger.error(f"Error sending push notification to {user_email}: {str(e)}")
+        logger.error(f"❌ Error in push notification handler: {str(e)}")
+        logger.info(f"====== PUSH NOTIFICATION HANDLER END ======")
         return False, {"error": str(e)}
 
 @app.route('/api/notifications/test-push', methods=['POST'])
@@ -4962,6 +4874,219 @@ def test_push_notification():
             "message": f"Error sending test push notification: {str(e)}"
         }), 500
 
+def save_temp_profile_image(base64_image, sender_id):
+    """Helper function to save a temporary profile image and return its URL"""
+    try:
+        # Extract the actual base64 data after the data:image/format;base64, prefix
+        if ',' in base64_image:
+            image_data = base64_image.split(',')[1]
+        else:
+            image_data = base64_image
+
+        # Decode base64 image
+        image_bytes = base64.b64decode(image_data)
+        
+        # Create temp directory if it doesn't exist
+        temp_dir = os.path.join(os.getcwd(), 'temp_profile_images')
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Generate filename using sender_id
+        filename = f"profile_{sender_id}_{int(time.time())}.jpg"
+        filepath = os.path.join(temp_dir, secure_filename(filename))
+        
+        # Save the image
+        with open(filepath, 'wb') as f:
+            f.write(image_bytes)
+            
+        # Return the URL path
+        return f"/temp_profile_images/{filename}"
+    except Exception as e:
+        logger.error(f"Error saving profile image: {str(e)}")
+        return None
+
+@app.route('/temp_profile_images/<filename>')
+def serve_temp_profile_image(filename):
+    """Serve temporary profile images"""
+    return send_from_directory('temp_profile_images', filename)
+
+@app.route('/api/notifications/send-message', methods=['POST'])
+def send_message_notification():
+    """
+    Send a direct message notification to a user without storing in database.
+    Profile images will be temporarily saved and served via URL for notifications.
+    """
+    try:
+        logger.info(f"====== MESSAGE NOTIFICATION REQUEST START ======")
+        data = request.json
+        
+        # Validate required fields
+        required_fields = ['receiverEmail', 'senderName', 'senderProfileImage', 'message']
+        if not data or not all(field in data for field in required_fields):
+            return jsonify({
+                'success': False,
+                'message': 'Missing required fields'
+            }), 400
+        
+        receiver_email = data['receiverEmail']
+        sender_name = data['senderName']
+        sender_profile_image = data['senderProfileImage']
+        message_text = data['message']
+        chat_type = data.get('chatType', 'direct')
+        chat_id = data.get('chatId', str(uuid.uuid4()))
+        group_name = data.get('groupName', '')
+        
+        logger.info(f"Processing message notification for receiver: {receiver_email}")
+        logger.info(f"From: {sender_name}")
+        logger.info(f"Chat Type: {chat_type}")
+        
+        # Save profile image and get URL
+        profile_image_url = save_temp_profile_image(sender_profile_image, chat_id)
+        if not profile_image_url:
+            logger.warning("Failed to save profile image, proceeding without image")
+        
+        notification_sent = False
+        socket_success = False
+        push_success = False
+        
+        # Prepare message data
+        message_data = {
+            'senderId': chat_id,
+            'senderName': sender_name,
+            'senderProfileImage': profile_image_url if profile_image_url else None,
+            'message': message_text,
+            'chatType': chat_type,
+            'chatId': chat_id,
+            'groupName': group_name if chat_type == 'group' else '',
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # 1. Send Socket.IO notification
+        try:
+            # Send to personal channel
+            socketio.emit(
+                f'message_{receiver_email}',
+                {
+                    'type': 'new_message',
+                    'data': message_data
+                }
+            )
+            
+            # Send to global messages channel
+            socketio.emit(
+                'messages',
+                {
+                    'userEmail': receiver_email,
+                    'type': 'new_message',
+                    'data': message_data
+                }
+            )
+            
+            logger.info(f"✅ Socket.IO: Message notification sent to {receiver_email}")
+            socket_success = True
+            notification_sent = True
+            
+        except Exception as socket_error:
+            logger.error(f"❌ Socket.IO: Failed to send message notification: {str(socket_error)}")
+        
+        # 2. Send Push Notification
+        try:
+            from push_notification_service import send_push_notification_to_user
+            
+            # Prepare push notification content
+            push_title = f"Message from {sender_name}"
+            push_body = message_text[:100] + ('...' if len(message_text) > 100 else '')
+            
+            if chat_type == 'group':
+                push_title = f"{group_name}"
+                push_body = f"{sender_name}: {push_body}"
+
+            # Prepare notification data with image
+            notification_data = {
+                'type': 'message',
+                'chatId': chat_id,
+                'chatType': chat_type,
+                'senderName': sender_name,
+                'timestamp': message_data['timestamp'],
+                # Add full server URL for the profile image
+                'image': f"{request.host_url.rstrip('/')}{profile_image_url}" if profile_image_url else None,
+                # Add specific payload for Android
+                'android': {
+                    'notification': {
+                        'imageUrl': f"{request.host_url.rstrip('/')}{profile_image_url}" if profile_image_url else None,
+                        'style': 'BIGPICTURE',
+                        'priority': 'high',
+                        'defaultSound': True
+                    }
+                },
+                # Add specific payload for iOS
+                'apns': {
+                    'payload': {
+                        'aps': {
+                            'mutable-content': 1,
+                            'sound': 'default'
+                        },
+                        'imageUrl': f"{request.host_url.rstrip('/')}{profile_image_url}" if profile_image_url else None
+                    }
+                }
+            }
+            
+            # Send push notification
+            push_result, push_details = send_push_notification_to_user(
+                db=db,
+                user_email=receiver_email,
+                title=push_title,
+                body=push_body,
+                data=notification_data
+            )
+            
+            if push_result:
+                logger.info(f"✅ Push: Message notification sent successfully")
+                push_success = True
+                notification_sent = True
+            else:
+                logger.warning(f"❌ Push: Failed to send message notification - {push_details.get('error')}")
+                
+        except Exception as push_error:
+            logger.error(f"❌ Push: Error sending message notification - {str(push_error)}")
+        
+        # Schedule cleanup of temporary profile image
+        def cleanup_temp_image():
+            try:
+                if profile_image_url:
+                    filepath = os.path.join(os.getcwd(), profile_image_url.lstrip('/'))
+                    if os.path.exists(filepath):
+                        os.remove(filepath)
+                        logger.info(f"Cleaned up temporary profile image: {filepath}")
+            except Exception as e:
+                logger.error(f"Error cleaning up temporary profile image: {str(e)}")
+        
+        # Schedule cleanup after 1 hour
+        threading.Timer(3600, cleanup_temp_image).start()
+        
+        # Prepare response
+        response_data = {
+            'deliveryStatus': {
+                'socket': socket_success,
+                'push': push_success,
+                'overall': notification_sent
+            },
+            'profileImageUrl': f"{request.host_url.rstrip('/')}{profile_image_url}" if profile_image_url else None
+        }
+        
+        logger.info(f"====== MESSAGE NOTIFICATION REQUEST END ======")
+        return jsonify({
+            'success': True,
+            'message': 'Message notification sent successfully' if notification_sent else 'Message delivery partially failed',
+            'data': response_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Error processing message notification: {str(e)}")
+        logger.info(f"====== MESSAGE NOTIFICATION REQUEST END ======")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
 
 if __name__ == '__main__':
     print("Starting Flask server with SocketIO...")
