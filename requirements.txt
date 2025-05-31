@@ -13,4 +13,4 @@ uuid
 numpy
 flask-socketio
 exponent-server-sdk
-
+requests
