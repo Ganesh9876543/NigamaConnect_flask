@@ -21,7 +21,8 @@ def initialize_firebase():
             # Verify if the secret file exists
             if os.path.exists(secret_file_path):
                 cred = credentials.Certificate(secret_file_path)
-                firebase_app = initialize_app(cred)
+                firebase_admin.initialize_app(cred)
+
                 
                 logger.info("Firebase initialized successfully")
                 return firebase_admin.get_app()
