@@ -12,5 +12,5 @@ python-dateutil
 uuid
 numpy
 flask-socketio
-
+exponent-server-sdk
 
