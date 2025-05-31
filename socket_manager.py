@@ -242,7 +242,7 @@ def setup_socket_handlers(socketio):
 
 def notify_user(user_email, event_data):
     """
-    Send a notification to a specific user via Socket.IO.
+    Send a notification to a specific user via Socket.IO and Push Notification.
     
     Args:
         user_email (str): Email of the user to notify
@@ -252,31 +252,121 @@ def notify_user(user_email, event_data):
         bool: True if notification was sent, False otherwise
     """
     global socketio
-    if not socketio:
-        logger.error("Socket.IO not initialized")
-        return False
-    
+    logger.info(f"====== NOTIFICATION DELIVERY START - {user_email} ======")
+    logger.info(f"Processing notification for user: {user_email}")
+    logger.info(f"Event data: {json.dumps(event_data, indent=2)}")
+
+    success_socket = False
+    success_push = False
+
     try:
-        # Add timestamp if not present
-        if isinstance(event_data, dict) and 'timestamp' not in event_data:
-            event_data['timestamp'] = datetime.now().isoformat()
-        
-        # Emit to the user's personal notification channel
-        user_channel = f'notification_{user_email}'
-        socketio.emit(user_channel, event_data)
-        logger.info(f"Notification sent to channel {user_channel}")
-        
-        # Also emit to the global notifications channel
-        socketio.emit('notifications', {
-            'userEmail': user_email,
-            'data': event_data
-        })
-        logger.info(f"Notification sent to global channel for {user_email}")
-        
-        return True
+        # 1. Socket.IO Notification
+        logger.info("Step 1: Sending Socket.IO notification")
+        if not socketio:
+            logger.error("❌ Socket.IO not initialized")
+            success_socket = False
+        else:
+            try:
+                # Add timestamp if not present
+                if isinstance(event_data, dict) and 'timestamp' not in event_data:
+                    event_data['timestamp'] = datetime.now().isoformat()
+                
+                # Emit to the user's personal notification channel
+                user_channel = f'notification_{user_email}'
+                socketio.emit(user_channel, event_data)
+                logger.info(f"✅ Socket.IO: Notification sent to personal channel {user_channel}")
+                
+                # Also emit to the global notifications channel
+                socketio.emit('notifications', {
+                    'userEmail': user_email,
+                    'data': event_data
+                })
+                logger.info(f"✅ Socket.IO: Notification sent to global channel")
+                success_socket = True
+                
+            except Exception as socket_error:
+                logger.error(f"❌ Socket.IO: Error sending notification: {str(socket_error)}")
+                success_socket = False
+
+        # 2. Push Notification
+        logger.info("Step 2: Sending Push notification")
+        try:
+            from app import send_push_notification
+
+            # Prepare push notification content based on event type
+            push_title = "Nigama Connect"
+            push_body = "You have a new notification"
+            
+            # Customize notification based on event type
+            if isinstance(event_data, dict):
+                event_type = event_data.get('type')
+                if event_type == 'new_notification':
+                    notif_data = event_data.get('notification', {})
+                    notif_type = notif_data.get('type')
+                    
+                    if notif_type == 'group_message':
+                        sender_name = notif_data.get('data', {}).get('senderName', 'Someone')
+                        group_name = notif_data.get('data', {}).get('groupName', 'a group')
+                        message_preview = notif_data.get('data', {}).get('messagePreview', '...')
+                        push_title = f"Message from {sender_name}"
+                        push_body = f"{group_name}: {message_preview}"
+                    
+                    elif notif_type == 'invitation':
+                        sender_name = notif_data.get('data', {}).get('senderName', 'Someone')
+                        invitation_type = notif_data.get('data', {}).get('invitationType', 'connection')
+                        push_title = f"New Invitation"
+                        push_body = f"{sender_name} sent you a {invitation_type} invitation"
+                    
+                    elif notif_type == 'event':
+                        event_title = notif_data.get('data', {}).get('eventTitle', 'Event')
+                        event_type = notif_data.get('data', {}).get('eventType', '')
+                        push_title = f"New {event_type} Event"
+                        push_body = f"{event_title}"
+                
+                elif event_type == 'new_invitation':
+                    sender_name = event_data.get('data', {}).get('senderName', 'Someone')
+                    invite_type = event_data.get('data', {}).get('type', 'connection')
+                    push_title = "New Invitation"
+                    push_body = f"{sender_name} sent you a {invite_type} invitation"
+
+            logger.info(f"Prepared push notification:")
+            logger.info(f"- Title: {push_title}")
+            logger.info(f"- Body: {push_body}")
+            logger.info(f"- Data: {json.dumps(event_data, indent=2)}")
+
+            # Send push notification
+            push_success, push_result = send_push_notification(
+                user_email=user_email,
+                title=push_title,
+                body=push_body,
+                data=event_data
+            )
+            
+            if push_success:
+                logger.info(f"✅ Push: Notification sent successfully")
+                logger.info(f"Push result: {json.dumps(push_result, indent=2)}")
+                success_push = True
+            else:
+                logger.warning(f"❌ Push: Failed to send notification")
+                logger.warning(f"Push error: {json.dumps(push_result, indent=2)}")
+                success_push = False
+
+        except Exception as push_error:
+            logger.error(f"❌ Push: Error processing push notification: {str(push_error)}")
+            success_push = False
+
+        # Final status
+        logger.info("Notification Delivery Summary:")
+        logger.info(f"- Socket.IO delivery: {'✅ Success' if success_socket else '❌ Failed'}")
+        logger.info(f"- Push notification: {'✅ Success' if success_push else '❌ Failed'}")
+        logger.info(f"====== NOTIFICATION DELIVERY END - {user_email} ======")
+
+        # Return True if at least one delivery method succeeded
+        return success_socket or success_push
     
     except Exception as e:
-        logger.error(f"Error sending notification to {user_email}: {str(e)}")
+        logger.error(f"❌ Fatal error in notification delivery: {str(e)}")
+        logger.info(f"====== NOTIFICATION DELIVERY END - {user_email} ======")
         return False
 
 def notify_friend_connection(sender_email, recipient_email, categories_info):
