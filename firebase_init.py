@@ -15,7 +15,7 @@ def initialize_firebase():
     except ValueError:
         # If no app exists, initialize a new one
         try:
-            cred = credentials.Certificate('./nigamaconnectapp-firebase-adminsdk-fbsvc-cfdb46d5b8.json')
+            cred = credentials.Certificate(secret_file_path)
             firebase_admin.initialize_app(cred)
             logger.info("Firebase initialized successfully")
             return firebase_admin.get_app()
