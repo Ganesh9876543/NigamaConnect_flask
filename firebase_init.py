@@ -1,7 +1,7 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
 import logging
-
+import os
 logger = logging.getLogger(__name__)
 
 def initialize_firebase():
