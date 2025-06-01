@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, url_for
 import random
 import smtplib
 from email.mime.text import MIMEText
@@ -205,31 +205,7 @@ def cleanup_expired_otps():
 # You could call this function periodically, or implement a scheduled task
 
 
-# try:
-#     # Use the secret file path in Render's secret directory
-#     secret_file_path = '/etc/secrets/firebase_service_account.json'
 
-#     # Verify if the secret file exists
-#     if os.path.exists(secret_file_path):
-#         cred = credentials.Certificate(secret_file_path)
-#         firebase_app = initialize_app(cred)
-#         db = firestore.client()
-#         user_profiles_ref = db.collection('user_profiles')
-#         family_tree_ref = db.collection('family_tree')  # Top-level collection
-#         logger.info("Firebase initialized successfully")
-#     else:
-#         raise FileNotFoundError(f"Secret file not found at: {secret_file_path}")
-# except Exception as e:
-#     logger.error(f"Error initializing Firebase: {e}")
-
-#     # Handle development mode scenario
-#     if os.environ.get('FLASK_ENV') == 'development':
-#         logger.warning("Running in development mode without Firebase")
-#         firebase_app = None
-#         db = None
-#         user_profiles_ref = None
-#     else:
-#         raise
 
 
 try:
@@ -5086,6 +5062,75 @@ def send_message_notification():
         return jsonify({
             'success': False,
             'message': str(e)
+        }), 500
+
+@app.route('/api/notifications/send-matrimony', methods=['POST'])
+def send_matrimony_notification():
+    try:
+        data = request.json
+        if not data or 'userEmail' not in data:
+            return jsonify({'success': False, 'message': 'Receiver email is required'}), 400
+        
+        
+
+        receiver_email = data['userEmail']
+        matrimony_data = data.get('data', {})
+        
+        # Prepare notification content
+        notification_title = matrimony_data.get('title', 'New Matrimony Profile')
+        notification_body = f"New profile: {matrimony_data.get('name', '')} - {matrimony_data.get('education', '')}, {matrimony_data.get('occupation', '')}"
+
+        # Prepare the data payload
+        notification_data = {
+            'type': 'matrimony',
+            'profileId': matrimony_data.get('profileId'),
+            'name': matrimony_data.get('name'),
+            'education': matrimony_data.get('education'),
+            'occupation': matrimony_data.get('occupation'),
+            'caste': matrimony_data.get('caste'),
+            'profileOwnerId': matrimony_data.get('profileOwnerId'),
+            'profileOwnerName': matrimony_data.get('profileOwnerName'),
+            'audience': matrimony_data.get('audience', 'All'),
+            'status': matrimony_data.get('status', 'new')
+        }
+
+        # Handle thumbnail/profile image if provided
+        thumbnail_url = matrimony_data.get('thumbnail')
+        if thumbnail_url and thumbnail_url.startswith('data:image'):
+            # If it's a base64 image, save it temporarily
+            filename = save_temp_profile_image(thumbnail_url, matrimony_data.get('profileOwnerId'))
+            if filename:
+                notification_data['thumbnail'] = url_for('serve_temp_profile_image', 
+                                                       filename=filename, 
+                                                       _external=True)
+        elif thumbnail_url:
+            # If it's already a URL, use it directly
+            notification_data['thumbnail'] = thumbnail_url
+
+        # Send the push notification
+        success = send_push_notification(
+            receiver_email,
+            notification_title,
+            notification_body,
+            notification_data
+        )
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Matrimony notification sent successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to send matrimony notification'
+            }), 500
+
+    except Exception as e:
+        print(f"Error sending matrimony notification: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error sending matrimony notification: {str(e)}'
         }), 500
 
 if __name__ == '__main__':
