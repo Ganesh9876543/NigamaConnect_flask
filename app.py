@@ -4639,12 +4639,16 @@ def register_device():
     }
     """
     try:
-        logger.info(f"====== DEVICE REGISTRATION REQUEST START ======")
+        logger.info("="*50)
+        logger.info("DEVICE REGISTRATION REQUEST START")
+        logger.info("="*50)
+        
         data = request.json
+        logger.info(f"Received registration request data: {json.dumps(data, indent=2)}")
         
         # Validate required fields
         if not data:
-            logger.warning("No data provided in the request")
+            logger.error("Registration failed: No data provided in request body")
             return jsonify({
                 "success": False,
                 "message": "No data provided"
@@ -4653,7 +4657,7 @@ def register_device():
         required_fields = ['email', 'token', 'device_type']
         for field in required_fields:
             if field not in data:
-                logger.warning(f"Missing required field: {field}")
+                logger.error(f"Registration failed: Missing required field '{field}'")
                 return jsonify({
                     "success": False,
                     "message": f"Missing required field: {field}"
@@ -4663,11 +4667,17 @@ def register_device():
         token = data['token']
         device_type = data['device_type']
         
+        logger.info("-"*30)
+        logger.info("Registration Details:")
+        logger.info(f"Email: {email}")
+        logger.info(f"Device Type: {device_type}")
+        logger.info(f"Token: {token}")
+        logger.info("-"*30)
+        
         # Check if token has valid format
         if not ('ExponentPushToken' in token or 'fcm' in token):
-            logger.warning(f"Potentially invalid token format: {token}")
-        
-        logger.info(f"Registering device token for user: {email}, device type: {device_type}")
+            logger.warning(f"Warning: Potentially invalid token format detected")
+            logger.warning(f"Token received: {token}")
         
         # Store in Firestore
         device_data = {
@@ -4679,23 +4689,32 @@ def register_device():
         
         # Get reference to user's device tokens collection
         user_ref = db.collection('user_profiles').document(email)
+        logger.info(f"Checking user profile in Firestore for email: {email}")
         
         # Check if user exists
         user_doc = user_ref.get()
         if not user_doc.exists:
-            logger.warning(f"User profile not found for email: {email}")
+            logger.error(f"User profile not found in database for email: {email}")
             return jsonify({
                 "success": False,
                 "message": "User profile not found"
             }), 404
         
+        logger.info(f"User profile found for email: {email}")
+        
         # Store token in device_tokens subcollection
         token_id = token.replace(':', '_').replace('[', '_').replace(']', '_')  # Sanitize for Firestore ID
+        logger.info(f"Sanitized token ID for storage: {token_id}")
+        
         device_tokens_ref = user_ref.collection('device_tokens')
         device_tokens_ref.document(token_id).set(device_data, merge=True)
         
-        logger.info(f"Device token registered successfully for {email}")
-        logger.info(f"====== DEVICE REGISTRATION REQUEST END ======")
+        logger.info(f"Successfully stored device token in Firestore")
+        logger.info(f"Storage location: user_profiles/{email}/device_tokens/{token_id}")
+        
+        logger.info("="*50)
+        logger.info("DEVICE REGISTRATION REQUEST COMPLETED SUCCESSFULLY")
+        logger.info("="*50)
         
         return jsonify({
             "success": True,
@@ -4703,12 +4722,17 @@ def register_device():
         })
         
     except Exception as e:
-        logger.error(f"Error registering device token: {str(e)}", exc_info=True)
-        logger.info(f"====== DEVICE REGISTRATION REQUEST END ======")
+        logger.error("="*50)
+        logger.error("DEVICE REGISTRATION ERROR")
+        logger.error(f"Error Type: {type(e).__name__}")
+        logger.error(f"Error Message: {str(e)}")
+        logger.error(f"Stack Trace:", exc_info=True)
+        logger.error("="*50)
         return jsonify({
             "success": False,
             "message": f"Server error registering device: {str(e)}"
         }), 500
+
 
 def send_push_notification(user_email, title, body, data=None):
     """
