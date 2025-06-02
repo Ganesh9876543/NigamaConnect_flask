@@ -45,6 +45,7 @@ from promocode_manager import add_promocode, get_promocode_details, update_tree_
 import base64
 import mimetypes
 import threading
+import json
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -879,19 +880,48 @@ def update_profile():
             "success": False,
             "error": str(e)
         }), 500
+# write store family tree image in firebase storage
+def store_family_tree_image(img_base64, family_tree_id):
+    try:
+        # ge thedocument ref of family tree using family tree id
+        family_tree_ref = db.collection('family_tree').document(family_tree_id)
+        family_tree_doc = family_tree_ref.get()
+        if not family_tree_doc.exists:
+            logger.error("Family tree document not found")
+            return jsonify({'error': 'Family tree document not found'}), 404
+        # create or updatethe field family_tree_image with the image base64
+        family_tree_ref.update({'family_tree_image': img_base64})
+        return jsonify({'success': True, 'message': 'Family tree image stored successfully'})
+    except Exception as e:
+        logger.error(f"Error in store_family_tree_image: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 from generate_family_tree import generate_family_tree
 @app.route('/generate-tree', methods=['POST'])
 def generate_tree():
     data = request.get_json()
     family_members = data.get('familyMembers', [])
+    family_tree_id = data.get('familyTreeId', '')
+    
+    print(family_tree_id)
     
     if not family_members:
         return jsonify({'error': 'No family data provided'}), 400
 
     try:
         img_base64 = generate_family_tree(family_members)
+        # store the image in firebase storage
+        if family_tree_id:
+            store_family_tree_image(img_base64, family_tree_id)     
+        else:
+            logger.error("No family tree ID provided")
+            return jsonify({'error': 'No family tree ID provided'}), 400
+        # write store family tree image in firebase storage
+        
+        
         return jsonify({'image': img_base64})
+    
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1188,6 +1218,8 @@ def get_family_tree():
         
         # Fetch family tree data using the ID
         family_tree_doc = family_tree_ref.document(family_tree_id).get()
+        
+        
         
         if not family_tree_doc.exists:
             return jsonify({
@@ -3200,9 +3232,18 @@ def add_husband_to_family_tree_api():
     """
     try:
         data = request.json
+        print(data)
         husband_node = data.get('husbandNode')
         wife_node_id = data.get('wifeNodeId')
         wife_family_tree_id = data.get('wifeFamilyTreeId')
+         
+        # wifeFamilyTreeId family-tree-20250524213720
+#  (NOBRIDGE) LOG  wifeNodeId 1748859314786-Parvati_Yarrampati
+#  (NOBRIDGE) LOG  Adding husband to family tree: {"husbandNode": {"birthOrder": null, "email": "", "gender": "male", "generation": 1, "id": "1748860140573-Vera_Krishna_Kurumala", "isSelf": false, "name": "Vera Krishna  Kurumala", "parentId": null, "phone": "", "profileImage": null, "spouse": "1748859314786-Parvati_Yarrampati", "userProfileExists": false}, "wifeFamilyTreeId": "family-tree-20250524213720", "wifeNodeId": "1748859314786-Parvati_Yarrampati"}
+        # chcek whentehr handling data correnctly befor sending to function     
+        print('wife family tree id',wife_family_tree_id)
+        print('wife node id',wife_node_id)
+        print('husband node',husband_node)
 
         if not husband_node or not wife_node_id or not wife_family_tree_id:
             return jsonify({
@@ -4733,7 +4774,6 @@ def register_device():
             "message": f"Server error registering device: {str(e)}"
         }), 500
 
-
 def send_push_notification(user_email, title, body, data=None):
     """
     Send push notification to a user's registered devices.
@@ -5156,6 +5196,26 @@ def send_matrimony_notification():
             'success': False,
             'message': f'Error sending matrimony notification: {str(e)}'
         }), 500
+        
+# write a api call  to get family tree image from firebasestorege using family tree id
+@app.route('/api/family-tree/get-image', methods=['GET'])
+def get_family_tree_image():
+    print("get family tree image api called")
+    family_tree_id = request.args.get('familyTreeId')
+    print("family tree id",family_tree_id)
+    try:
+        # get the document ref of family tree using family tree id
+        family_tree_ref = db.collection('family_tree').document(family_tree_id)
+        print("family tree ref",family_tree_ref)
+        family_tree_doc = family_tree_ref.get()
+        if not family_tree_doc.exists:
+            return jsonify({'error': 'Family tree document not found'}), 404
+        # get the family tree image from the document
+        family_tree_image = family_tree_doc.get('family_tree_image')
+        print("tree image fetched successfullly")
+        return jsonify({'family_tree_image': family_tree_image})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     print("Starting Flask server with SocketIO...")
