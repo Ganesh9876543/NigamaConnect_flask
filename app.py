@@ -46,6 +46,7 @@ import base64
 import mimetypes
 import threading
 import json
+from io import BytesIO
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -1907,7 +1908,7 @@ def generate_friends_tree_visualization():
 
 def generate_friends_tree(user_email, user_name, user_profile_image, friends_list):
     """
-    Generate a tree visualization for a user's friends
+    Generate a tree visualization for a user's friends using the same theme as family tree
     
     Args:
         user_email (str): Email of the user
@@ -1921,27 +1922,14 @@ def generate_friends_tree(user_email, user_name, user_profile_image, friends_lis
     import tempfile
     import os
     import base64
-    import shutil
     from graphviz import Digraph
     from PIL import Image, ImageDraw, ImageOps
     import io
 
-    # Debug flag
-    DEBUG = True
-    
-    # Make sure Graphviz is available
-    try:
-        from graphviz.backend import run_check
-        run_check()
-        print("Graphviz is available and working.")
-    except Exception as e:
-        print(f"WARNING: Graphviz check failed: {e}")
-        
-    # Create temp directory
+    # Create temp directory for profile images
     temp_dir = tempfile.mkdtemp(prefix='friends_tree_')
-    print(f"Using temporary directory: {temp_dir}")
     
-    # Create a Digraph object with simplified background
+    # Create a Digraph object with enhanced background (same as family tree)
     dot = Digraph(
         comment='Friends Tree',
         format='png',
@@ -1949,153 +1937,100 @@ def generate_friends_tree(user_email, user_name, user_profile_image, friends_lis
         graph_attr={
             'rankdir': 'TB',  # Top to bottom direction
             'splines': 'polyline',  # Use polyline for natural connections
-            'bgcolor': 'lightblue',  # Simplified background color
-            'nodesep': '0.75',  # Node separation
-            'ranksep': '1.5',  # Rank separation
+            'bgcolor': '#FFFFFF',  # Pure white background
+            'nodesep': '1.4',  # Increased node separation
+            'ranksep': '2.0',  # Increased rank separation
             'fontname': 'Arial',
-            'style': 'rounded,filled',  # Add rounded style to the graph
+            'style': 'rounded',  # Rounded style
             'color': '#000000',  # Black border color
-            'penwidth': '3.0',  # Thicker border
+            'penwidth': '2.0',  # Border thickness
         },
         node_attr={
             'shape': 'box',
             'style': 'filled,rounded',
             'fillcolor': 'white',
-            'fontcolor': 'black',  # Black text for all nodes
-            'penwidth': '2.0',
-            'fontsize': '14',
+            'fontcolor': 'black',
+            'penwidth': '1.5',
+            'fontsize': '22',
             'fontname': 'Arial',
-            'height': '0.6',
-            'width': '1.6',
-            'margin': '0.2'
+            'height': '1.2',
+            'width': '2.8',
+            'margin': '0.5'
         },
         edge_attr={
-            'color': '#000000',  # Black color for all edges
-            'penwidth': '2.0'  # Thicker edges
+            'color': '#444444',
+            'penwidth': '4.0'
         }
     )
 
-    # Create profile image node function with improved handling for different data formats
     def create_profile_image_node(profile_image_data, node_id):
-        """Create a temporary profile image file from base64 data, bytes, or use default icon."""
+        """Create a temporary profile image file from base64 data or use default icon."""
         image_path = os.path.join(temp_dir, f'friend_profile_{node_id}.png')
         
         try:
             if profile_image_data:
-                image_bytes = None
-                
-                # Handle different data formats
+                # Handle base64 string
                 if isinstance(profile_image_data, str):
-                    # Check if it has a base64 header
-                    if ',' in profile_image_data:
-                        # Strip the header if present
-                        _, profile_image_data = profile_image_data.split(',', 1)
-                    try:
-                        # Decode base64 string to bytes
-                        image_bytes = base64.b64decode(profile_image_data)
-                    except Exception as decode_error:
-                        print(f"Error decoding base64 data: {decode_error}")
-                        return None
+                    if profile_image_data.startswith('data:image'):
+                        # Extract the base64 data
+                        base64_data = profile_image_data.split(',')[1]
+                        image_data = base64.b64decode(base64_data)
                         
-                elif isinstance(profile_image_data, bytes):
-                    # Already bytes, use directly
-                    image_bytes = profile_image_data
+                        # Convert to PIL Image
+                        img = Image.open(BytesIO(image_data))
+                        img = img.convert('RGBA')
+                        # Resize to a reasonable size
+                        img = img.resize((100, 100), Image.Resampling.LANCZOS)
+                        img.save(image_path, 'PNG')
+                        return image_path
                 
-                # If we have valid image bytes, process them
-                if image_bytes:
-                    # Create a PIL Image from bytes
-                    img = Image.open(io.BytesIO(image_bytes))
-                    
-                    # Convert to RGB if needed
-                    if img.mode != 'RGB':
-                        img = img.convert('RGB')
-                    
-                    # Resize to a standard size
-                    img = img.resize((100, 100))
-                    
-                    # Make circular by creating a mask
-                    mask = Image.new('L', (100, 100), 0)
-                    draw = ImageDraw.Draw(mask)
-                    draw.ellipse((0, 0, 100, 100), fill=255)
-                    
-                    # Apply the circular mask
-                    img = ImageOps.fit(img, mask.size, centering=(0.5, 0.5))
-                    img.putalpha(mask)
-                    
-                    # Save the image
+                # Handle bytes directly
+                elif isinstance(profile_image_data, bytes):
+                    img = Image.open(BytesIO(profile_image_data))
+                    img = img.convert('RGBA')
+                    img = img.resize((100, 100), Image.Resampling.LANCZOS)
                     img.save(image_path, 'PNG')
-                    
-                    if DEBUG:
-                        print(f"Created profile image at: {image_path}")
-                        print(f"Image exists: {os.path.exists(image_path)}")
-                        print(f"Image size: {os.path.getsize(image_path)} bytes")
-                    
                     return image_path
-                else:
-                    raise ValueError("Could not convert profile image data to bytes")
             
-            # If we reach here, either no data was provided or processing failed
-            # Create a simple profile icon using PIL
-            img = Image.new('RGB', (100, 100), (204, 204, 204))
+            # Create default profile icon
+            img = Image.new('RGBA', (100, 100), (255, 255, 255, 0))
             draw = ImageDraw.Draw(img)
             # Draw a circle for the head
-            draw.ellipse([25, 25, 75, 75], fill=(255, 255, 255))
+            draw.ellipse([25, 25, 75, 75], fill=(204, 204, 204, 255))
             # Draw a path for the body
-            draw.polygon([(50, 70), (30, 100), (70, 100)], fill=(255, 255, 255))
+            draw.polygon([(50, 70), (30, 100), (70, 100)], fill=(204, 204, 204, 255))
             img.save(image_path, 'PNG')
-            
-            if DEBUG:
-                print(f"Created default profile image at: {image_path}")
-                
             return image_path
             
         except Exception as e:
             print(f"Error creating profile image: {e}")
-            import traceback
-            print(traceback.format_exc())
-            # Return None on error and let calling code handle the missing image
             return None
 
-    # Create center node for the user
+    # Create center node for the user with special styling
     user_node_id = "user"
-    
-    # Create user profile image node with improved handling
-    print(f"User profile image type: {type(user_profile_image)}")
-    if isinstance(user_profile_image, bytes):
-        print(f"User profile image is in bytes format, length: {len(user_profile_image)}")
-    elif isinstance(user_profile_image, str):
-        print(f"User profile image is in string format, length: {len(user_profile_image)}")
-    else:
-        print(f"User profile image is in format: {type(user_profile_image)}")
-    
     user_image_path = create_profile_image_node(user_profile_image, user_node_id)
     
     # Create a stylized label for the user node
-    user_label = "<<TABLE BORDER='0' CELLBORDER='1' CELLSPACING='0' CELLPADDING='4'>"
-    if user_image_path and os.path.exists(user_image_path):
-        # Properly format the path for Graphviz
-        image_path = os.path.abspath(user_image_path).replace('\\', '/')
-        if DEBUG:
-            print(f"User image path for DOT: {image_path}")
-        user_label += f"<TR><TD ROWSPAN='2'><IMG SRC='{image_path}' SCALE='TRUE' WIDTH='50' HEIGHT='50'/></TD>"
+    user_label = f"<<TABLE BORDER='0' CELLBORDER='0' CELLSPACING='0' CELLPADDING='10'>"
+    if user_image_path:
+        image_path = user_image_path.replace('\\', '/')
+        user_label += f"<TR><TD ROWSPAN='2'><IMG SRC='{image_path}' SCALE='TRUE' FIXEDSIZE='TRUE' WIDTH='90' HEIGHT='90'/></TD>"
     else:
-        user_label += "<TR><TD ROWSPAN='2'>👤</TD>"
+        user_label += "<TR><TD ROWSPAN='2'><FONT POINT-SIZE='50'>👤</FONT></TD>"
     
-    # Add name information
-    user_label += f"<TD ALIGN='LEFT'><B>{user_name}</B></TD></TR>"
-    
-    # Add self label
-    user_label += f"<TR><TD ALIGN='LEFT'>Myself</TD></TR>"
+    # Add name with larger font
+    user_label += f"<TD ALIGN='LEFT'><FONT POINT-SIZE='35'><B>{user_name}</B></FONT></TD></TR>"
+    user_label += f"<TR><TD ALIGN='LEFT'><FONT POINT-SIZE='31'>Myself</FONT></TD></TR>"
     user_label += "</TABLE>>"
     
     # Add user node with special styling
     dot.node(
         user_node_id,
         label=user_label,
-        fillcolor='#4CAF50',  # Green background for user node
+        fillcolor='#00a3ee',  # Special blue color for self node
         fontcolor='white',
         style='filled,rounded',
-        penwidth='3.0'
+        penwidth='1.5'
     )
 
     # Group friends by category
@@ -2106,129 +2041,116 @@ def generate_friends_tree(user_email, user_name, user_profile_image, friends_lis
             friend_categories[category] = []
         friend_categories[category].append(friend)
 
-    # Add invisible connection point node (center point)
-    center_point_id = "center_point"
-    dot.node(center_point_id, label="", shape="point", width="0.1", height="0.1", style="invis")
-    
-    # Connect user to center point
-    dot.edge(user_node_id, center_point_id, style="dotted", arrowhead="none")
-
-    # Category colors
+    # Category colors (using a softer palette)
     category_colors = {
-        'Family': '#E6B0AA',  # Light red
-        'Close Friends': '#AED6F1',  # Light blue
-        'Colleagues': '#A9DFBF',  # Light green
-        'Neighbors': '#F9E79F',  # Light yellow
-        'School': '#D7BDE2'  # Light purple
+        'Family': '#E8F5E9',  # Soft green
+        'Close Friends': '#E3F2FD',  # Soft blue
+        'Colleagues': '#FFF3E0',  # Soft orange
+        'School': '#F3E5F5',  # Soft purple
+        'Neighbors': '#FFFDE7',  # Soft yellow
+        'Other': '#FAFAFA'  # Light gray
     }
 
-    # For each category, create a cluster and add friend nodes
+    # Create a central point for better organization
+    center_point = "center_point"
+    dot.node(center_point, "", shape="point", style="invis")
+    dot.edge(user_node_id, center_point, style="invis")
+
+    # For each category, create a subgraph
     for category_index, (category, friends) in enumerate(friend_categories.items()):
-        # Create a subgraph for this category to group friends
-        with dot.subgraph(name=f'cluster_category_{category_index}') as c:
-            c.attr(label=category, style="rounded,filled", fillcolor="#F0F0F0", fontname="Arial", fontsize="16")
+        # Create a subgraph for this category
+        with dot.subgraph(name=f'cluster_{category}') as c:
+            c.attr(
+                label=category,
+                style='filled,rounded',
+                fillcolor=category_colors.get(category, '#FAFAFA'),
+                fontname='Arial',
+                fontsize='25',
+                penwidth='2.0'
+            )
             
-            # Create an ordered chain within this category
-            # Remove the 'rank="same"' attribute to allow vertical arrangement
+            # Create a chain of nodes for vertical arrangement
+            prev_node_id = None
             
-            # Create previous node tracker for vertical connections
-            prev_friend_id = None
-            
+            # Add friend nodes in this category
             for i, friend in enumerate(friends):
                 friend_id = f"friend_{category_index}_{i}"
                 
-                # Create friend profile image node from base64 data with improved handling
+                # Create friend profile image
                 friend_image_path = create_profile_image_node(friend.get('profileImage'), friend_id)
                 
-                # Create a stylized label for the friend node
-                friend_label = "<<TABLE BORDER='0' CELLBORDER='1' CELLSPACING='0' CELLPADDING='4'>"
-                if friend_image_path and os.path.exists(friend_image_path):
-                    # Properly format the path for Graphviz
-                    image_path = os.path.abspath(friend_image_path).replace('\\', '/')
-                    friend_label += f"<TR><TD ROWSPAN='2'><IMG SRC='{image_path}' SCALE='TRUE' WIDTH='50' HEIGHT='50'/></TD>"
+                # Create stylized label for friend node
+                friend_label = f"<<TABLE BORDER='0' CELLBORDER='0' CELLSPACING='0' CELLPADDING='10'>"
+                if friend_image_path:
+                    image_path = friend_image_path.replace('\\', '/')
+                    friend_label += f"<TR><TD ROWSPAN='2'><IMG SRC='{image_path}' SCALE='TRUE' FIXEDSIZE='TRUE' WIDTH='90' HEIGHT='90'/></TD>"
                 else:
-                    friend_label += "<TR><TD ROWSPAN='2'>👤</TD>"
+                    friend_label += "<TR><TD ROWSPAN='2'><FONT POINT-SIZE='50'>👤</FONT></TD>"
                 
-                # Add name information
-                friend_label += f"<TD ALIGN='LEFT'><B>{friend.get('name', 'Unknown')}</B></TD></TR>"
-                
-                # Add email information
-                friend_label += f"<TR><TD ALIGN='LEFT'>{friend.get('email', '')}</TD></TR>"
+                # Add name and category
+                friend_label += f"<TD ALIGN='LEFT'><FONT POINT-SIZE='35'><B>{friend.get('name', 'Unknown')}</B></FONT></TD></TR>"
+                friend_label += f"<TR><TD ALIGN='LEFT'><FONT POINT-SIZE='31'>{category}</FONT></TD></TR>"
                 friend_label += "</TABLE>>"
                 
-                # Get fillcolor based on category
-                fillcolor = category_colors.get(category, '#F5F5F5')  # Default to light gray
-                
-                # Add friend node with proper styling
+                # Add friend node
                 c.node(
                     friend_id,
                     label=friend_label,
-                    fillcolor=fillcolor,
-                    fontcolor='black',
+                    fillcolor='white',
                     style='filled,rounded',
-                    penwidth='2.0'
+                    penwidth='1.5'
                 )
                 
-                # If this is the first friend in the category, connect it to the center point
-                if i == 0:
-                    dot.edge(center_point_id, friend_id, style="solid", arrowhead="none")
+                # Connect to previous node in the category for vertical arrangement
+                if prev_node_id:
+                    # Add invisible edge to force vertical arrangement
+                    c.edge(prev_node_id, friend_id, style="invis", constraint='true')
+                elif i == 0:
+                    # Connect first node of category to center point
+                    dot.edge(center_point, friend_id, 
+                        color='#444444',
+                        penwidth='4.0',
+                        arrowhead='none'
+                    )
                 
-                # If there was a previous friend in this category, connect this friend below it
-                if prev_friend_id:
-                    # Add invisible edge to enforce vertical ordering
-                    c.edge(prev_friend_id, friend_id, style="invis")
+                # Update previous node ID for next iteration
+                prev_node_id = friend_id
                 
-                # Update previous friend ID for next iteration
-                prev_friend_id = friend_id
+            # Force all nodes in this category to be arranged vertically
+            c.attr(rankdir='TB')  # Top to bottom arrangement within category
+            if len(friends) > 1:
+                c.attr(rank='same')  # Ensure nodes in same category stay together
 
-    # Add a title with a decorative border
-    dot.attr(label=r'\nFriends Tree\n', fontsize="24", fontname="Arial", 
-             labelloc="t", labeljust="c", 
-             style="filled", fillcolor="#E0F7FA", color="#000000", penwidth="3.0")
-
-    # Output files
-    output_path = os.path.join(temp_dir, 'friends_tree')
+    # Render the graph to PNG
+    temp_dir = tempfile.gettempdir()
+    output_path = os.path.abspath(os.path.join(temp_dir, 'friends_tree'))
     
     try:
-        # Save DOT file for debugging
-        with open(f"{output_path}.dot", 'w', encoding='utf-8') as f:
-            f.write(dot.source)
+        # Create the output directory if it doesn't exist
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
-        if DEBUG:
-            print(f"DOT file saved to {output_path}.dot")
-            
         # Render the graph
-        dot.render(output_path, cleanup=False)
-        
-        if DEBUG:
-            print(f"Graph rendered to {output_path}.png")
-            print(f"File exists: {os.path.exists(f'{output_path}.png')}")
-            print(f"File size: {os.path.getsize(f'{output_path}.png') if os.path.exists(f'{output_path}.png') else 'N/A'} bytes")
+        dot.render(output_path, format='png', cleanup=True)
         
         # Read the image and encode it to base64
         with open(f"{output_path}.png", 'rb') as f:
             img_data = f.read()
-        
         img_base64 = base64.b64encode(img_data).decode('utf-8')
         
-        if DEBUG:
-            print(f"Image encoded to base64, length: {len(img_base64)}")
+        # Clean up temporary files
+        for root, dirs, files in os.walk(temp_dir):
+            for file in files:
+                if file.startswith('friend_profile_'):
+                    try:
+                        os.remove(os.path.join(root, file))
+                    except:
+                        pass
         
         return img_base64
+        
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"Error rendering graph: {e}")
-        print(error_details)
-        return f"Error: {str(e)}\nDetails: {error_details}\nDOT file saved to {output_path}.dot for debugging"
-    finally:
-        try:
-            # Clean up temporary directory
-            if not DEBUG:  # Keep files if debugging
-                shutil.rmtree(temp_dir)
-                print(f"Cleaned up temporary directory: {temp_dir}")
-        except Exception as cleanup_error:
-            print(f"Error cleaning up: {cleanup_error}")
+        print(f"Error generating friends tree: {e}")
+        return None
 
 @app.route('/api/get-connections', methods=['GET'])
 def get_connections():
