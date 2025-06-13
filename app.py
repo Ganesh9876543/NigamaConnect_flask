@@ -4294,13 +4294,13 @@ def archive_notifications_api():
 @app.route('/notifications/unread-count/<email>', methods=['GET'])
 def get_unread_notifications_count(email):
     """
-    Get the count of unread notifications for a specific user.
+    Get the count of unread notifications for a specific user, broken down by type.
     
     Args:
         email (str): User's email address
     
     Returns:
-        JSON with unread notification count
+        JSON with unread notification counts by type
     """
     try:
         if not email:
@@ -4312,16 +4312,41 @@ def get_unread_notifications_count(email):
         # Get reference to user's notifications collection
         notifications_ref = db.collection('user_profiles').document(email).collection('notifications')
         
-        # Get unread notifications query
+        # Get all unread notifications
         unread_query = notifications_ref.where('isRead', '==', False)
-        
-        # Get the count using get() instead of count()
         unread_docs = unread_query.get()
-        unread_count = len(list(unread_docs))
+        
+        # Initialize counters
+        total_count = 0
+        event_count = 0
+        invitation_count = 0
+        classified_count = 0
+        message_count = 0
+        
+        # Count notifications by type
+        for doc in unread_docs:
+            notification = doc.to_dict()
+            total_count += 1
+            
+            notification_type = notification.get('type', '')
+            if notification_type == 'event':
+                event_count += 1
+            elif notification_type == 'invitation':
+                invitation_count += 1
+            elif notification_type == 'classified':
+                classified_count += 1
+            elif notification_type == 'group_message':
+                message_count += 1
         
         return jsonify({
             "success": True,
-            "unreadCount": unread_count
+            "counts": {
+                "total": total_count,
+                "events": event_count,
+                "invitations": invitation_count,
+                "classifieds": classified_count,
+                "messages": message_count
+            }
         })
         
     except Exception as e:
@@ -5138,6 +5163,114 @@ def get_family_tree_image():
         return jsonify({'family_tree_image': family_tree_image})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+from twilio.rest import Client
+import random
+# Storage for phone OTPs
+phone_otp_storage = {}
+
+@app.route('/send-phone-otp', methods=['POST'])
+def send_phone_otp():
+    data = request.json
+    phone_number = data.get('phone_number')
+    
+    phone_number = '+91'+phone_number
+
+    print(f"Received request to send OTP to phone: {phone_number}")
+
+    if not phone_number:
+        print("Phone number is required")
+        return jsonify({'success': False, 'message': 'Phone number is required'}), 400
+
+    # Generate a random 4-digit OTP
+    otp = ''.join([str(random.randint(0, 9)) for _ in range(4)])
+    
+    # Store OTP with current timestamp
+    current_time = int(time.time())
+    phone_otp_storage[phone_number] = {'otp': otp, 'timestamp': current_time}
+
+    print(f"Generated OTP for {phone_number}: {otp}, valid until: {current_time + OTP_EXPIRATION_TIME}")
+
+    try:
+        # Send OTP via Twilio
+        account_sid = 'AC1d845f7c006cc615c355e7b7aba4a9e2'
+        auth_token = '559af056d5d28b986b6471c48217af18'
+        twilio_phone_number = '+15709345635'
+
+        client = Client(account_sid, auth_token)
+        
+        message = client.messages.create(
+            body=f'Your Nigama Connect verification code is: {otp}. This code is valid for 10 minutes.',
+            from_=twilio_phone_number,
+            to=phone_number
+        )
+        print("OTP SMS sent successfully")
+        return jsonify({'success': True, 'message': 'OTP sent successfully'})
+    except Exception as e:
+        print(f"Error sending OTP SMS: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/verify-phone-otp', methods=['POST'])
+def verify_phone_otp():
+    data = request.json
+    phone_number = data.get('phone_number')
+    phone_number = '+91'+phone_number
+    otp = data.get('otp')
+
+    print(f"Received request to verify OTP for phone: {phone_number}")
+
+    if not phone_number or not otp:
+        print("Phone number and OTP are required")
+        return jsonify({'success': False, 'message': 'Phone number and OTP are required'}), 400
+
+    stored_data = phone_otp_storage.get(phone_number)
+
+    if not stored_data:
+        print(f"No OTP found for phone: {phone_number}")
+        return jsonify({'success': False, 'message': 'OTP not found or expired'}), 404
+
+    # Check if OTP has expired
+    current_time = int(time.time())
+    if current_time - stored_data['timestamp'] > OTP_EXPIRATION_TIME:
+        print(f"OTP expired for phone: {phone_number}")
+        # Remove expired OTP
+        del phone_otp_storage[phone_number]
+        return jsonify({'success': False, 'message': 'OTP has expired. Please request a new one.'}), 400
+
+    if stored_data['otp'] == otp:
+        print(f"OTP verified successfully for phone: {phone_number}")
+        del phone_otp_storage[phone_number]  # Clear the OTP after successful verification
+        return jsonify({'success': True, 'message': 'OTP verified successfully'})
+    else:
+        print(f"Invalid OTP for phone: {phone_number}")
+        return jsonify({'success': False, 'message': 'Invalid OTP'}), 400
+
+# Update cleanup function to handle both email and phone OTPs
+def cleanup_expired_otps():
+    current_time = int(time.time())
+    expired_emails = []
+    expired_phones = []
+
+    # Clean up email OTPs
+    for email, data in otp_storage.items():
+        if current_time - data['timestamp'] > OTP_EXPIRATION_TIME:
+            expired_emails.append(email)
+     
+    for email in expired_emails:
+        del otp_storage[email]
+
+    # Clean up phone OTPs
+    for phone, data in phone_otp_storage.items():
+        if current_time - data['timestamp'] > OTP_EXPIRATION_TIME:
+            expired_phones.append(phone)
+     
+    for phone in expired_phones:
+        del phone_otp_storage[phone]
+    
+    print(f"Cleaned up {len(expired_emails)} expired email OTPs and {len(expired_phones)} expired phone OTPs")
+
+
 
 if __name__ == '__main__':
     print("Starting Flask server with SocketIO...")
