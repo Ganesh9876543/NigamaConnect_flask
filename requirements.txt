@@ -14,4 +14,4 @@ numpy
 flask-socketio
 exponent-server-sdk
 requests
-twilio==8.10.0
+twilio
