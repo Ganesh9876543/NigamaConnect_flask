@@ -267,6 +267,15 @@ def create_profile():
         
         # Extract email to use as document ID
         email = profile_data.get('email')
+
+
+         # create a numbercollection and add the phone number to it
+        number_collection_ref = db.collection('numbers')
+        number_doc_ref = number_collection_ref.document('+91'+profile_data.get('phone'))
+        number_doc_ref.set({
+            'phone': profile_data.get('phone'),
+            'email': email
+        })
         
         # Generate a unique ID for the profile image entry
         image_entry_id = "profileimage"
@@ -5281,6 +5290,20 @@ def cleanup_expired_otps():
         del phone_otp_storage[phone]
     
     print(f"Cleaned up {len(expired_emails)} expired email OTPs and {len(expired_phones)} expired phone OTPs")
+
+
+@app.route('/api/number/get-email', methods=['GET'])
+def get_email_from_number():
+    phone_number = request.args.get('phone_number')
+    phone_number = '+91'+phone_number
+    number_collection_ref = db.collection('numbers')
+    if number_collection_ref:
+        number_doc_ref = number_collection_ref.document(phone_number)
+        if not number_doc_ref.get().exists: 
+            return jsonify({'email': None}), 200
+        number_data = number_doc_ref.get().to_dict()
+        print("number data",number_data)
+    return jsonify({'email': number_data.get('email')})
 
 
 
