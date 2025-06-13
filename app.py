@@ -47,6 +47,7 @@ import mimetypes
 import threading
 import json
 from io import BytesIO
+from dotenv import load_dotenv
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -5194,9 +5195,20 @@ def send_phone_otp():
 
     try:
         # Send OTP via Twilio
-        account_sid = 'AC1d845f7c006cc615c355e7b7aba4a9e2'
-        auth_token = '559af056d5d28b986b6471c48217af18'
-        twilio_phone_number = '+15709345635'
+        # account_sid = 'AC1d845f7c006cc615c355e7b7aba4a9e2'
+        # auth_token = '559af056d5d28b986b6471c48217af18'
+        # twilio_phone_number = '+15709345635'
+
+        # secret_file_path = '/etc/secrets/firebase_service_account.json'
+
+        #     # Verify if the secret file exists
+        #     if os.path.exists(secret_file_path):
+       
+        account_sid = os.getenv('TWILIO_ACCOUNT_SID')
+        auth_token = os.getenv('TWILIO_AUTH_TOKEN')
+        twilio_phone_number = os.getenv('TWILIO_PHONE_NUMBER')
+
+        
 
         client = Client(account_sid, auth_token)
         
