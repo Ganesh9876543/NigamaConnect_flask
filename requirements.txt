@@ -14,4 +14,4 @@ numpy
 flask-socketio
 exponent-server-sdk
 requests
-Twillo
+twillo
