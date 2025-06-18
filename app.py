@@ -267,9 +267,9 @@ def create_profile():
         
         # Extract email to use as document ID
         email = profile_data.get('email')
-
-
-         # create a numbercollection and add the phone number to it
+        first_name = profile_data.get('firstName')
+        
+        # create a numbercollection and add the phone number to it
         number_collection_ref = db.collection('numbers')
         number_doc_ref = number_collection_ref.document('+91'+profile_data.get('phone'))
         number_doc_ref.set({
@@ -325,6 +325,56 @@ def create_profile():
                 logger.info(f"Profile and image created for {email} with image ID: {image_entry_id}")
             else:
                 logger.info(f"Profile created for {email} without image")
+            
+            # Send welcome email
+            welcome_subject = "Welcome to Nigama Connect!"
+            welcome_body = f"""
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff;">
+        <h2 style="color: #007bff; margin-top: 0;">Welcome to Nigama Connect!</h2>
+        
+        <p>Dear {first_name},</p>
+        
+        <p>Welcome to Nigama Connect! We're thrilled to have you join our growing community.</p>
+        
+        <p>At Nigama Connect, we offer a unique platform designed to help you:</p>
+        
+        <ul style="padding-left: 20px;">
+            <li>Build and explore your family tree</li>
+            <li>Connect with relatives and strengthen family bonds</li>
+            <li>Share and discover family events</li>
+            <li>Access matrimony services</li>
+            <li>Browse and post classifieds within the community</li>
+            <li>Network professionally with community members</li>
+        </ul>
+        
+        <div style="background-color: #e8f4ff; padding: 15px; border-radius: 6px; margin: 20px 0;">
+            <h3 style="color: #007bff; margin-top: 0;">Getting Started</h3>
+            <ol style="margin: 0; padding-left: 20px;">
+                <li>Complete your profile</li>
+                <li>Start building your family tree</li>
+                <li>Connect with family members</li>
+                <li>Explore community features</li>
+            </ol>
+        </div>
+        
+        <p>Need help? Our support team is always here to assist you. Feel free to reach out to us at <a href="nigamaconnect@gmail.com" style="color: #007bff;">nigamaconnect@gmail.com</a>.</p>
+        
+        <p>Thank you for joining Nigama Connect. We look forward to helping you strengthen your family bonds and build meaningful connections within the community.</p>
+        
+        <p>Best regards,<br>
+        The Nigama Connect Team</p>
+    </div>
+</body>
+</html>
+"""
+            try:
+                send_email(email, welcome_subject, welcome_body)
+                logger.info(f"Welcome email sent to {email}")
+            except Exception as email_error:
+                logger.error(f"Error sending welcome email to {email}: {str(email_error)}")
+                # Continue execution even if email fails
             
             return jsonify({
                 "success": True,
@@ -567,6 +617,64 @@ def set_login_true():
             # Update the document to set 'login' to true
             user_ref.update({"login": True})
             logger.info(f"Login set to true for email: {email}")
+            
+            # Get user's name for personalized email
+            user_data = doc.to_dict()
+            first_name = user_data.get('firstName', '')
+            
+            # Send thank you email
+            thank_you_subject = "Welcome Back to Nigama Connect!"
+            thank_you_body = f"""
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff;">
+        <h2 style="color: #007bff; margin-top: 0;">Welcome Back to Nigama Connect!</h2>
+        
+        <p>Dear {first_name},</p>
+        
+        <p>Thank you for logging into Nigama Connect! We're excited to have you back.</p>
+        
+        <p>Here's what's waiting for you:</p>
+        
+        <div style="background-color: #e8f4ff; padding: 15px; border-radius: 6px; margin: 20px 0;">
+            <h3 style="color: #007bff; margin-top: 0;">Your Nigama Connect Features</h3>
+            <ul style="padding-left: 20px;">
+                <li><strong>Family Tree:</strong> Build, explore, and connect with your family history</li>
+                <li><strong>Events & RSVPs:</strong> Stay updated with family gatherings and celebrations</li>
+                <li><strong>Classifieds:</strong> Browse or post items and services within the community</li>
+                <li><strong>Matrimony Search:</strong> Find potential matches that align with your preferences</li>
+                <li><strong>Professional Network:</strong> Connect with community members professionally</li>
+                <li><strong>Real-time Chat:</strong> Stay in touch with your connections</li>
+            </ul>
+        </div>
+        
+        <div style="background-color: #fff4e8; padding: 15px; border-radius: 6px; margin: 20px 0;">
+            <h3 style="color: #ff7f00; margin-top: 0;">What's New?</h3>
+            <ul style="padding-left: 20px;">
+                <li>Enhanced family tree visualization</li>
+                <li>Improved chat features</li>
+                <li>Better event management</li>
+                <li>More matrimony search filters</li>
+            </ul>
+        </div>
+        
+        <p>Need assistance? Our support team is here to help at <a href="nigamaconnect@gmail.com" style="color: #007bff;">nigamaconnect@gmail.com</a>.</p>
+        
+        <p>Happy connecting!</p>
+        
+        <p>Best regards,<br>
+        The Nigama Connect Team</p>
+    </div>
+</body>
+</html>
+"""
+            try:
+                send_email(email, thank_you_subject, thank_you_body)
+                logger.info(f"Thank you email sent to {email}")
+            except Exception as email_error:
+                logger.error(f"Error sending thank you email to {email}: {str(email_error)}")
+                # Continue execution even if email fails
+            
             return jsonify({
                 "success": True,
                 "message": "Login set to true successfully",
