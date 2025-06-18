@@ -5305,7 +5305,215 @@ def get_email_from_number():
         print("number data",number_data)
     return jsonify({'email': number_data.get('email')})
 
+@app.route('/notifications/<email>/mark-events-read', methods=['POST'])
+def mark_events_notifications_read(email):
+    """
+    Mark all event notifications as read for a specific user.
+    
+    Args:
+        email (str): User's email address
+    
+    Returns:
+        JSON with success status and count of notifications marked as read
+    """
+    try:
+        logger.info(f"====== MARK EVENTS READ REQUEST START ======")
+        logger.info(f"Marking all event notifications as read for user: {email}")
+        
+        if not email:
+            logger.warning("Email parameter is missing")
+            return jsonify({
+                "success": False,
+                "message": "Email is required"
+            }), 400
+        
+        # Get reference to user's notifications collection
+        notifications_ref = db.collection('user_profiles').document(email).collection('notifications')
+        
+        # Get all unread event notifications
+        unread_events = notifications_ref.where('isRead', '==', False).where('type', '==', 'event').get()
+        
+        # Get the IDs of unread event notifications
+        event_ids = [doc.id for doc in unread_events]
+        count = len(event_ids)
+        
+        if count == 0:
+            return jsonify({
+                "success": True,
+                "message": "No unread event notifications found",
+                "count": 0
+            })
+        
+        # Mark all event notifications as read
+        batch = db.batch()
+        now = datetime.now().isoformat()
+        
+        for notification_id in event_ids:
+            doc_ref = notifications_ref.document(notification_id)
+            batch.update(doc_ref, {
+                'isRead': True,
+                'updatedAt': now
+            })
+        
+        # Commit the batch update
+        batch.commit()
+        
+        logger.info(f"Successfully marked {count} event notifications as read for {email}")
+        logger.info(f"====== MARK EVENTS READ REQUEST END ======")
+        
+        return jsonify({
+            "success": True,
+            "message": f"Successfully marked {count} event notifications as read",
+            "count": count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error marking event notifications as read: {str(e)}", exc_info=True)
+        logger.info(f"====== MARK EVENTS READ REQUEST END ======")
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
 
+@app.route('/notifications/<email>/mark-invitations-read', methods=['POST'])
+def mark_invitations_notifications_read(email):
+    """
+    Mark all invitation notifications as read for a specific user.
+    
+    Args:
+        email (str): User's email address
+    
+    Returns:
+        JSON with success status and count of notifications marked as read
+    """
+    try:
+        logger.info(f"====== MARK INVITATIONS READ REQUEST START ======")
+        logger.info(f"Marking all invitation notifications as read for user: {email}")
+        
+        if not email:
+            logger.warning("Email parameter is missing")
+            return jsonify({
+                "success": False,
+                "message": "Email is required"
+            }), 400
+        
+        # Get reference to user's notifications collection
+        notifications_ref = db.collection('user_profiles').document(email).collection('notifications')
+        
+        # Get all unread invitation notifications
+        unread_invitations = notifications_ref.where('isRead', '==', False).where('type', '==', 'invitation').get()
+        
+        # Get the IDs of unread invitation notifications
+        invitation_ids = [doc.id for doc in unread_invitations]
+        count = len(invitation_ids)
+        
+        if count == 0:
+            return jsonify({
+                "success": True,
+                "message": "No unread invitation notifications found",
+                "count": 0
+            })
+        
+        # Mark all invitation notifications as read
+        batch = db.batch()
+        now = datetime.now().isoformat()
+        
+        for notification_id in invitation_ids:
+            doc_ref = notifications_ref.document(notification_id)
+            batch.update(doc_ref, {
+                'isRead': True,
+                'updatedAt': now
+            })
+        
+        # Commit the batch update
+        batch.commit()
+        
+        logger.info(f"Successfully marked {count} invitation notifications as read for {email}")
+        logger.info(f"====== MARK INVITATIONS READ REQUEST END ======")
+        
+        return jsonify({
+            "success": True,
+            "message": f"Successfully marked {count} invitation notifications as read",
+            "count": count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error marking invitation notifications as read: {str(e)}", exc_info=True)
+        logger.info(f"====== MARK INVITATIONS READ REQUEST END ======")
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+@app.route('/notifications/<email>/mark-classifieds-read', methods=['POST'])
+def mark_classifieds_notifications_read(email):
+    """
+    Mark all classified notifications as read for a specific user.
+    
+    Args:
+        email (str): User's email address
+    
+    Returns:
+        JSON with success status and count of notifications marked as read
+    """
+    try:
+        logger.info(f"====== MARK CLASSIFIEDS READ REQUEST START ======")
+        logger.info(f"Marking all classified notifications as read for user: {email}")
+        
+        if not email:
+            logger.warning("Email parameter is missing")
+            return jsonify({
+                "success": False,
+                "message": "Email is required"
+            }), 400
+        
+        # Get reference to user's notifications collection
+        notifications_ref = db.collection('user_profiles').document(email).collection('notifications')
+        
+        # Get all unread classified notifications
+        unread_classifieds = notifications_ref.where('isRead', '==', False).where('type', '==', 'classified').get()
+        
+        # Get the IDs of unread classified notifications
+        classified_ids = [doc.id for doc in unread_classifieds]
+        count = len(classified_ids)
+        
+        if count == 0:
+            return jsonify({
+                "success": True,
+                "message": "No unread classified notifications found",
+                "count": 0
+            })
+        
+        # Mark all classified notifications as read
+        batch = db.batch()
+        now = datetime.now().isoformat()
+        
+        for notification_id in classified_ids:
+            doc_ref = notifications_ref.document(notification_id)
+            batch.update(doc_ref, {
+                'isRead': True,
+                'updatedAt': now
+            })
+        
+        # Commit the batch update
+        batch.commit()
+        
+        logger.info(f"Successfully marked {count} classified notifications as read for {email}")
+        logger.info(f"====== MARK CLASSIFIEDS READ REQUEST END ======")
+        
+        return jsonify({
+            "success": True,
+            "message": f"Successfully marked {count} classified notifications as read",
+            "count": count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error marking classified notifications as read: {str(e)}", exc_info=True)
+        logger.info(f"====== MARK CLASSIFIEDS READ REQUEST END ======")
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
 
 if __name__ == '__main__':
     print("Starting Flask server with SocketIO...")
