@@ -589,8 +589,11 @@ def set_login_true():
     """
     try:
         # Get the email from the request
+        print('request====================== login true')
+        
         data = request.json
         email = data.get('email')
+        print('email====================== login true',email)
 
         if not email:
             return jsonify({
@@ -623,18 +626,18 @@ def set_login_true():
             first_name = user_data.get('firstName', '')
             
             # Send thank you email
-            thank_you_subject = "Welcome Back to Nigama Connect!"
+            thank_you_subject = "Thankyou for logging into Nigama Connect!"
             thank_you_body = f"""
 <html>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
     <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff;">
-        <h2 style="color: #007bff; margin-top: 0;">Welcome Back to Nigama Connect!</h2>
+        <h2 style="color: #007bff; margin-top: 0;">Welcome to Nigama Connect!</h2>
         
         <p>Dear {first_name},</p>
         
-        <p>Thank you for logging into Nigama Connect! We're excited to have you back.</p>
+        <p>Thank you for logging into Nigama Connect! We're glad to have you here.</p>
         
-        <p>Here's what's waiting for you:</p>
+        <p>Here are the amazing features available for you:</p>
         
         <div style="background-color: #e8f4ff; padding: 15px; border-radius: 6px; margin: 20px 0;">
             <h3 style="color: #007bff; margin-top: 0;">Your Nigama Connect Features</h3>
@@ -649,12 +652,12 @@ def set_login_true():
         </div>
         
         <div style="background-color: #fff4e8; padding: 15px; border-radius: 6px; margin: 20px 0;">
-            <h3 style="color: #ff7f00; margin-top: 0;">What's New?</h3>
+            <h3 style="color: #ff7f00; margin-top: 0;">Quick Tips</h3>
             <ul style="padding-left: 20px;">
-                <li>Enhanced family tree visualization</li>
-                <li>Improved chat features</li>
-                <li>Better event management</li>
-                <li>More matrimony search filters</li>
+                <li>Update your profile to connect better</li>
+                <li>Start building your family tree</li>
+                <li>Check out upcoming events</li>
+                <li>Browse the community classifieds</li>
             </ul>
         </div>
         
