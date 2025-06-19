@@ -5298,7 +5298,7 @@ def send_phone_otp():
     
     phone_number = '+91'+phone_number
 
-    print(f"Received request to send OTP to phone: {phone_number}")
+    logger.info(f"Received request to send OTP to phone: {phone_number}")
 
     if not phone_number:
         print("Phone number is required")
@@ -5311,7 +5311,7 @@ def send_phone_otp():
     current_time = int(time.time())
     phone_otp_storage[phone_number] = {'otp': otp, 'timestamp': current_time}
 
-    print(f"Generated OTP for {phone_number}: {otp}, valid until: {current_time + OTP_EXPIRATION_TIME}")
+    logger.info(f"Generated OTP for {phone_number}: {otp}, valid until: {current_time + OTP_EXPIRATION_TIME}")
 
     try:
         # Send OTP via Twilio
@@ -5337,10 +5337,10 @@ def send_phone_otp():
             from_=twilio_phone_number,
             to=phone_number
         )
-        print("OTP SMS sent successfully")
+        logger.info("OTP SMS sent successfully")
         return jsonify({'success': True, 'message': 'OTP sent successfully'})
     except Exception as e:
-        print(f"Error sending OTP SMS: {e}")
+        logger.info(f"Error sending OTP SMS: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/verify-phone-otp', methods=['POST'])
