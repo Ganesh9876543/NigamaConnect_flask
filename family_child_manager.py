@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 import logging
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,10 @@ def create_family_tree_with_father_child(
             'phone': father_profile.get('phone', ''),
             'isSelf': True,
             "generation": 1,
-            'userProfileExists': True
+            'userProfileExists': True,
+            'aliveStatus': True,
+            'dateOfBirth': father_profile.get('DOB', ''),
+            'deathDate': father_profile.get('deathDate', '')
         }
         
         # Try to get father's profile image
@@ -288,6 +292,14 @@ def add_child_with_subtree(
         child_node_id = f"{timestamp}-{child_full_name.replace(' ', '')}"
         logger.info(f"Generated child node ID: {child_node_id}")
         
+        
+        email1=None
+        
+        for member in father_family_members:
+                if member.get('email') and member.get('userProfileExists') == True:
+                    email1 = member.get('email')
+                    break
+        
         # SCENARIO 1: Child has no family tree
         if not child_family_tree_id:
             logger.info("Scenario 1: Child has no family tree - creating new node")
@@ -302,7 +314,10 @@ def add_child_with_subtree(
                 'parentId': father_node_id,
                 'userProfileExists': True,
                 'isSelf':False,
-                'generation': child_generation  # Add generation information
+                'generation': child_generation,  # Add generation information
+                'aliveStatus': True,
+                'dateOfBirth': child_profile.get('DOB', ''),
+                'deathDate': child_profile.get('deathDate', '')
             }
             
             # Try to get child's profile image
@@ -345,6 +360,22 @@ def add_child_with_subtree(
             })
             logger.info("Updated child's profile with father's family tree ID")
             
+            # get any one userprofile exits email from the family tree id
+            
+            
+            # call an api  to update in otehr backent
+            if email1:  
+                http_request = requests.post(
+                    f"https://9b38g2lm-5001.inc1.devtunnels.ms//api/users/share-items",
+                    json={
+                        "email1": email1,
+                        "email2": child_email
+                    }
+                )
+                logger.info(f"Successfully completed adding new child to father's family tree: {http_request.json()}")
+            else:
+                logger.warning("No userprofile exits email from the family tree id")
+                
             logger.info("Successfully completed adding new child to father's family tree")
             return {
                 "success": True,
@@ -358,6 +389,7 @@ def add_child_with_subtree(
         
         # SCENARIO 2: Child has own family tree - merge only child's subtree
         else:
+            
             logger.info("Scenario 2: Child has existing family tree - merging subtree")
             # Get child's family tree
             child_tree_doc = family_tree_ref.document(child_family_tree_id).get()
@@ -467,7 +499,10 @@ def add_child_with_subtree(
                     'parentId': father_node_id,
                     'userProfileExists': True,
                     'isSelf': True,  # Mark as self for future reference
-                    'generation': child_generation  # Add generation information
+                    'generation': child_generation,  # Add generation information
+                    'aliveStatus': True,
+                    'dateOfBirth': child_profile.get('DOB', ''),
+                    'deathDate': child_profile.get('deathDate', '')
                 }
                 
                 # Try to get child's profile image
@@ -635,6 +670,22 @@ def add_child_with_subtree(
             if child_node_id and child_node_id in child_members_dict:
                 logger.info(f"Starting collection of descendants for child node: {child_node_id}")
                 descendants = collect_descendants(child_node_id, child_members_dict, generation_diff)
+                
+                #get all the emil from decendants where userprofile exitts true and add to a list
+                email_list = []
+                for member in descendants:
+                    if member.get('email') and member.get('userProfileExists') == True:
+                        email_list.append(member.get('email'))
+                
+                # call an api  to update in otehr backent   
+                http_request = requests.post(
+                    f"https://9b38g2lm-5001.inc1.devtunnels.ms//api/users/share-items-multiple",
+                    json={
+                        "email1": email1,
+                        "targetEmails": email_list
+                    }
+                )
+                
                 subtree_to_merge.extend(descendants)
                 logger.info(f"Collected {len(descendants)} descendants for child's subtree")
             else:
