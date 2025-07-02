@@ -1,6 +1,7 @@
 from datetime import datetime
 import logging
 import uuid
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -283,7 +284,10 @@ def create_family_tree_with_parents(
             'phone': child_profile.get('phone', ''),
             'isSelf': True,
             'userProfileExists': True,
-            'generation': child_generation  # Child generation is based on parent's generation
+            'generation': child_generation,  # Child generation is based on parent's generation
+            'dateOfBirth': child_profile.get('DOB', ''),
+            'aliveStatus': True,
+            
         }
         
         # Try to get child's profile image
@@ -654,6 +658,27 @@ def merge_family_trees(
             family_members.append(child_node)
             logger.info(f"Added child node to family members. Total members: {len(family_members)}")
             
+            
+            email1=None
+            for member in family_members:
+                if member.get('email') and member.get('userProfileExists') == True:
+                    email1 = member.get('email')
+                    break
+                
+            if email1:
+                http_request = requests.post(
+                    f"https://9b38g2lm-5001.inc1.devtunnels.ms/api/users/share-items",
+                    json={
+                        "email1": email1,
+                        "email2": child_email
+                    }
+                )
+                
+                logger.info(f"Successfully completed adding new child to father's family tree: {http_request.json()}")
+            else:
+                logger.info(f"No email1 found for father's family tree: {father_tree_id}")
+            
+            
             # Update the tree
             family_tree_ref.document(father_tree_id).update({
                 'familyMembers': family_members,
@@ -775,6 +800,11 @@ def merge_family_trees(
         
         # Collect child's subtree (including spouse and all descendants)
         subtree_members = collect_subtree_members(child_members, child_node_id)
+        
+        # get email from family members where userprofile exitts true and add to a list
+        
+        logger.info(f"Successfully completed adding new child to father's family tree: {http_request.json()}")
+                
         logger.info(f"Collected {len(subtree_members)} members from child's subtree")
         
         # Calculate generation adjustment
@@ -835,6 +865,27 @@ def merge_family_trees(
                     relatives_added += 1
         
         logger.info(f"Added {relatives_added} new relatives to father's tree")
+        
+        email1 = None
+        for member in merged_members:
+            if member.get('email') and member.get('userProfileExists') == True:
+                email1 = member.get('email')
+                break
+        
+        
+        email_list = []
+        for member in father_members:
+            if member.get('email') and member.get('userProfileExists') == True and member.get('email') != child_email:
+                email_list.append(member.get('email'))
+                
+        # call an api  to update in otehr backent   
+        http_request = requests.post(
+            f"https://9b38g2lm-5001.inc1.devtunnels.ms/api/users/share-items-multiple",
+            json={
+                "email1": email1,
+                "targetEmails": email_list
+            }
+        )
         
         # Update the father's tree with merged members and relatives
         family_tree_ref.document(father_tree_id).update({
