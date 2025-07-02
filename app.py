@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, send_from_directory, url_for
 import random
 import smtplib
+import traceback
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import time
@@ -47,7 +48,6 @@ import mimetypes
 import threading
 import json
 from io import BytesIO
-from dotenv import load_dotenv
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -626,7 +626,7 @@ def set_login_true():
             first_name = user_data.get('firstName', '')
             
             # Send thank you email
-            thank_you_subject = "Thankyou for logging into Nigama Connect!"
+            thank_you_subject = "Welcome to Nigama Connect!"
             thank_you_body = f"""
 <html>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -970,6 +970,8 @@ def update_profile():
 
     try:
         # Get the JSON data from the request
+        print("update_profile")
+        
         data = request.json
         email = data.get('email')
 
@@ -1032,7 +1034,10 @@ def generate_tree():
         return jsonify({'error': 'No family data provided'}), 400
 
     try:
-        img_base64 = generate_family_tree(family_members)
+        result = generate_family_tree(family_members)
+        if "error" in result:
+            return jsonify({"error": result["error"]}), 500
+        img_base64 = result["image"]
         # store the image in firebase storage
         if family_tree_id:
             store_family_tree_image(img_base64, family_tree_id)     
@@ -1042,7 +1047,12 @@ def generate_tree():
         # write store family tree image in firebase storage
         
         
-        return jsonify({'image': img_base64})
+        return jsonify({
+            'image': img_base64,
+            'coordinates': result['coordinates'],
+            'image_width': result['image_width'], 
+            'image_height': result['image_height']
+        })
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -3895,9 +3905,11 @@ def add_promocode_api():
         node_id = data.get('nodeId')
         name = data.get('name')
         sender_name = data.get('senderName')
+        relation=data.get('relation')
+        sender_email=data.get('senderEmail')
         
         # Validate required fields
-        if not all([promocode, family_tree_id, node_id, name, sender_name]):
+        if not all([promocode, family_tree_id, node_id, name, sender_name,relation,sender_email]):
             return jsonify({
                 "success": False,
                 "error": "Missing required fields: promocode, familyTreeId, nodeId, name, and senderName are required"
@@ -3912,7 +3924,9 @@ def add_promocode_api():
             family_tree_id=family_tree_id,
             node_id=node_id,
             name=name,
-            sender_name=sender_name
+            relation=relation,
+            sender_name=sender_name,
+            sender_email=sender_email
         )
         
         if not result.get("success"):
@@ -4040,6 +4054,8 @@ def update_tree_with_promocode():
         if not result.get("success"):
             logger.error(f"Function call failed: {result.get('message') or result.get('error')}")
             return jsonify(result), 404
+        
+        
         
         logger.info(f"Function call successful: {result.get('message')}")
         logger.info(f"User has profile: {result.get('userHasProfile')}, Profile created: {result.get('profileCreated')}")
@@ -5284,8 +5300,6 @@ def get_family_tree_image():
         return jsonify({'family_tree_image': family_tree_image})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-
 from twilio.rest import Client
 import random
 # Storage for phone OTPs
@@ -5298,7 +5312,7 @@ def send_phone_otp():
     
     phone_number = '+91'+phone_number
 
-    logger.info(f"Received request to send OTP to phone: {phone_number}")
+    print(f"Received request to send OTP to phone: {phone_number}")
 
     if not phone_number:
         print("Phone number is required")
@@ -5311,24 +5325,15 @@ def send_phone_otp():
     current_time = int(time.time())
     phone_otp_storage[phone_number] = {'otp': otp, 'timestamp': current_time}
 
-    logger.info(f"Generated OTP for {phone_number}: {otp}, valid until: {current_time + OTP_EXPIRATION_TIME}")
+    print(f"Generated OTP for {phone_number}: {otp}, valid until: {current_time + OTP_EXPIRATION_TIME}")
 
     try:
         # Send OTP via Twilio
-        # account_sid = 'AC1d845f7c006cc615c355e7b7aba4a9e2'
-        # auth_token = '559af056d5d28b986b6471c48217af18'
-        # twilio_phone_number = '+15709345635'
-
-        # secret_file_path = '/etc/secrets/firebase_service_account.json'
-
-        #     # Verify if the secret file exists
-        #     if os.path.exists(secret_file_path):
        
+        
         account_sid = os.getenv('TWILIO_ACCOUNT_SID')
         auth_token = os.getenv('TWILIO_AUTH_TOKEN')
         twilio_phone_number = os.getenv('TWILIO_PHONE_NUMBER')
-
-        
 
         client = Client(account_sid, auth_token)
         
@@ -5337,10 +5342,10 @@ def send_phone_otp():
             from_=twilio_phone_number,
             to=phone_number
         )
-        logger.info("OTP SMS sent successfully")
+        print("OTP SMS sent successfully")
         return jsonify({'success': True, 'message': 'OTP sent successfully'})
     except Exception as e:
-        logger.info(f"Error sending OTP SMS: {e}")
+        print(f"Error sending OTP SMS: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/verify-phone-otp', methods=['POST'])
@@ -5401,8 +5406,8 @@ def cleanup_expired_otps():
         del phone_otp_storage[phone]
     
     print(f"Cleaned up {len(expired_emails)} expired email OTPs and {len(expired_phones)} expired phone OTPs")
-
-
+    
+# write an api call to get email from number collection
 @app.route('/api/number/get-email', methods=['GET'])
 def get_email_from_number():
     phone_number = request.args.get('phone_number')
@@ -5624,6 +5629,283 @@ def mark_classifieds_notifications_read(email):
         return jsonify({
             "success": False,
             "message": str(e)
+        }), 500
+
+@app.route('/api/family-tree/delete-node', methods=['POST'])
+def delete_family_tree_node():
+    try:
+        print(f"Starting node deletion process...")
+        data = request.get_json()
+        family_tree_id = data.get('familyTreeId')
+        node_id = data.get('nodeId')
+        
+        print(f"Received request to delete node {node_id} from family tree {family_tree_id}")
+
+        if not family_tree_id or not node_id:
+            print(f"Error: Missing parameters. familyTreeId: {family_tree_id}, nodeId: {node_id}")
+            return jsonify({'error': 'Missing required parameters'}), 400
+
+        # Get the family tree document
+        db = firestore.client()
+        family_tree_ref = db.collection('family_tree').document(family_tree_id)
+        family_tree_doc = family_tree_ref.get()
+        print(f"Retrieved family tree document: {family_tree_id}")
+
+        if not family_tree_doc.exists:
+            print(f"Error: Family tree {family_tree_id} not found")
+            return jsonify({'error': 'Family tree not found'}), 404
+
+        family_tree_data = family_tree_doc.to_dict()
+        members = family_tree_data.get('familyMembers', [])
+        print(f"Total members in tree: {len(members)}")
+
+        # Find the node in the members list
+        node_to_delete = None
+        for member in members:
+            if member.get('id') == node_id:
+                node_to_delete = member
+                break
+
+        if not node_to_delete:
+            print(f"Error: Node {node_id} not found in family tree {family_tree_id}")
+            return jsonify({'error': 'Node not found in family tree'}), 404
+        print(f"Node to delete: {node_to_delete}")
+        nodes_to_process = []  # List to store nodes that need profile updates
+
+        @firestore.transactional
+        def delete_node_transaction(transaction):
+            # Get fresh copy of the tree in transaction
+            tree_doc = family_tree_ref.get(transaction=transaction)
+            current_tree_data = tree_doc.to_dict()
+            current_members = current_tree_data.get('familyMembers', [])
+
+            # Check if it's a leaf node (no children)
+            has_children = False
+            for member in current_members:
+                if member.get('parentId') == node_id:
+                    has_children = True
+                    break
+            
+            print(f"Node {node_id} has children: {has_children}")
+
+            if not has_children:
+                print(f"Processing leaf node deletion for node {node_id}")
+                # Handle leaf node deletion
+                if node_to_delete.get('email'):
+                    print(f"Adding email {node_to_delete['email']} to profile updates list")
+                    nodes_to_process.append({
+                        'email': node_to_delete['email'],
+                        'nodeId': node_id
+                    })
+
+                # Remove the node
+                current_members = [m for m in current_members if m.get('id') != node_id]
+                print(f"Removed leaf node {node_id} from family tree")
+
+                # If node has a spouse, update spouse's data
+                if node_to_delete.get('spouse'):
+                    spouse_id = node_to_delete['spouse']
+                    print(f"Processing spouse {spouse_id} for leaf node {node_id}")
+                    for member in current_members:
+                        if member.get('id') == spouse_id:
+                            member['spouse'] = None
+                            print(f"Updated spouse {spouse_id} - removed spouse reference")
+                            break
+            else:
+                print(f"Processing non-leaf node deletion for node {node_id}")
+                # Handle non-leaf node deletion
+                nodes_to_delete = set()
+                nodes_to_delete.add(node_id)
+                print(f"Initial node to delete: {node_id}")
+
+                # Function to recursively find all descendant nodes
+                def find_descendants(current_node_id):
+                    print(f"Finding descendants for node {current_node_id}")
+                    for member in current_members:
+                        if member.get('parentId') == current_node_id:
+                            member_id = member.get('id')
+                            nodes_to_delete.add(member_id)
+                            print(f"Added descendant {member_id} to deletion list")
+                            # Store email for profile update if exists
+                            if member.get('email'):
+                                print(f"Adding email {member['email']} to profile updates list")
+                                nodes_to_process.append({
+                                    'email': member['email'],
+                                    'nodeId': member_id
+                                })
+                            # Recursively find descendants
+                            find_descendants(member_id)
+
+                # Find all descendants
+                find_descendants(node_id)
+                print(f"Total nodes to delete: {len(nodes_to_delete)}")
+                print(f"Nodes to delete: {nodes_to_delete}")
+
+                # Store the node to be deleted's email if exists
+                if node_to_delete.get('email'):
+                    print(f"Adding root node email {node_to_delete['email']} to profile updates list")
+                    nodes_to_process.append({
+                        'email': node_to_delete['email'],
+                        'nodeId': node_id
+                    })
+
+                # Handle spouse if exists
+                if node_to_delete.get('spouse'):
+                    spouse_id = node_to_delete['spouse']
+                    print(f"Processing spouse {spouse_id} for non-leaf node {node_id}")
+                    for member in current_members:
+                        if member.get('id') == spouse_id:
+                            member['spouse'] = None
+                            print(f"Updated spouse {spouse_id} - removed spouse reference")
+                            break
+
+                # Remove all nodes marked for deletion
+                current_members = [m for m in current_members if m.get('id') not in nodes_to_delete]
+                print(f"Removed {len(nodes_to_delete)} nodes from family tree")
+
+            # Update the family tree
+            print(f"Updating family tree with {len(current_members)} remaining members")
+            transaction.update(family_tree_ref, {
+                'familyMembers': current_members
+            })
+            print("Family tree update completed in transaction")
+
+        # Execute the transaction
+        print("Executing transaction...")
+        transaction = db.transaction()
+        delete_node_transaction(transaction)
+        print("Transaction completed successfully")
+
+        # Update user profiles for all affected nodes
+        print(f"Processing {len(nodes_to_process)} user profiles for updates")
+        for node_info in nodes_to_process:
+            try:
+                print(f"Processing user profile for email: {node_info['email']}")
+                user_ref = db.collection('user_profiles').document(node_info['email'])
+                user_doc = user_ref.get()
+                
+                if user_doc.exists:
+                    user_data = user_doc.to_dict()
+                    if (user_data.get('familyTreeId') == family_tree_id and 
+                        user_data.get('nodeId') == node_info['nodeId']):
+                        print(f"Updating user profile for {node_info['email']} - removing tree connection")
+                        # Update user profile to remove family tree connection
+                        user_ref.update({
+                            'familyTreeId': None,
+                            'nodeId': None
+                        })
+                        print(f"Successfully updated user profile for {node_info['email']}")
+                else:
+                    print(f"User profile not found for email: {node_info['email']}")
+            except Exception as e:
+                print(f"Error updating user profile for {node_info['email']}: {str(e)}")
+
+        print("Node deletion process completed successfully")
+        return jsonify({'success': True, 'message': 'Node deleted successfully'})
+
+    except Exception as e:
+        print(f"Error in delete_family_tree_node: {str(e)}")
+        print(f"Stack trace: ", traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/family-tree/update-node', methods=['POST'])
+def update_family_tree_node():
+    """
+    Update specific node details in a family tree.
+    Expected request body:
+    {
+        "familyTreeId": "string",
+        "nodeId": "string",
+        "firstName": "string",
+        "email": "string",
+        "phone": "string"
+    }
+    """
+    try:
+        data = request.json
+        family_tree_id = data.get('familyTreeId')
+        node_id = data.get('nodeId')
+        first_name = data.get('firstName')
+        email = data.get('email')
+        phone = data.get('phone')
+        date_of_birth = data.get('dateOfBirth')
+        alive_status = data.get('aliveStatus')
+        death_date = data.get('deathDate')
+        
+
+        if not all([family_tree_id, node_id, first_name]):
+            return jsonify({
+                "success": False,
+                "error": "familyTreeId, nodeId, and firstName are required"
+            }), 400
+
+        # Get the family tree document
+        tree_doc = family_tree_ref.document(family_tree_id).get()
+        if not tree_doc.exists:
+            return jsonify({
+                "success": False,
+                "error": f"Family tree not found with ID: {family_tree_id}"
+            }), 404
+
+        tree_data = tree_doc.to_dict()
+        family_members = tree_data.get('familyMembers', [])
+        node_found = False
+        updated_members = []
+
+        # Find and update the target node
+        for member in family_members:
+            if member.get('id') == node_id:
+                # Keep existing last name if present in the current name
+                current_name = member.get('name', '')
+                name_parts = current_name.split()
+                last_name = name_parts[-1] if len(name_parts) > 1 else ''
+                
+                # Update the member details
+                member['name'] = f"{first_name} {last_name}".strip()
+                if email:
+                    member['email'] = email
+                if phone:
+                    member['phone'] = phone
+                if date_of_birth:
+                    member['dateOfBirth'] = date_of_birth
+                if alive_status is not None:
+                    member['aliveStatus'] = alive_status
+                if death_date:
+                    member['deathDate'] = death_date
+                member['updatedAt'] = datetime.now().isoformat()
+                node_found = True
+            updated_members.append(member)
+
+        if not node_found:
+            return jsonify({
+                "success": False,
+                "error": f"Node with ID {node_id} not found in family tree"
+            }), 404
+
+        # Update the family tree
+        family_tree_ref.document(family_tree_id).update({
+            'familyMembers': updated_members,
+            'updatedAt': datetime.now().isoformat()
+        })
+
+        # If email is provided, update the user's profile
+        if email:
+            user_doc = user_profiles_ref.document(email).get()
+            if user_doc.exists:
+                user_profiles_ref.document(email).update({
+                    'updatedAt': datetime.now().isoformat()
+                })
+
+        return jsonify({
+            "success": True,
+            "message": "Node updated successfully"
+        })
+
+    except Exception as e:
+        logger.error(f"Error updating family tree node: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
         }), 500
 
 if __name__ == '__main__':
